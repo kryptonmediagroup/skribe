@@ -1,0 +1,30 @@
+# Python bytecode caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Editor / OS junk
+*~
+*.swp
+.DS_Store
+
+# Local agent / IDE state
+.claude/
+.vscode/
+.idea/
+
+# Per-session scratch
+session_context
+session_restart
+
+# Skribe / Scrivener project bundles used as test artifacts
+*.skribe/
+*.scriv/
+
+# Author drafts kept off public history
+sampleDocuments/
