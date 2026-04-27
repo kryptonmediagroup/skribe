@@ -89,6 +89,23 @@ Override with `SKRIBE_VENV=/path/to/venv` if you'd rather keep the venv elsewher
 
 `run.sh` simply execs `python -m skribe` from the configured venv.
 
+## Packaging a standalone binary
+
+Skribe ships a PyInstaller spec (`skribe.spec`) that produces a single self-contained executable per platform — no Python install required on the target machine.
+
+```bash
+"$HOME/skribe/.venv/bin/pip" install pyinstaller
+"$HOME/skribe/.venv/bin/pyinstaller" skribe.spec --clean
+# → dist/Skribe/        (folder distribution; binary is dist/Skribe/Skribe)
+# → dist/Skribe.app     (additionally, on macOS)
+```
+
+A few caveats:
+- **No cross-compile.** Build on each target OS — Windows, macOS, Linux x86_64, and Linux aarch64 (Raspberry Pi 5) — using the same spec.
+- **External binaries are not bundled.** pandoc, LibreOffice (`soffice`), and hunspell dictionaries must still be installed on the target machine.
+- **Native icons are optional.** Drop `skribe.ico` (Windows) or `skribe.icns` (macOS) into `skribe/resources/icons/` and the spec picks them up automatically; otherwise the OS uses a generic app icon and the in-app QApplication icon (the SVG) takes over once the window is up.
+- **UPX is off** in the spec — it has a long history of corrupting Qt binaries on some platforms.
+
 ## Project layout
 
 ```
@@ -120,9 +137,14 @@ skribe/
 │   ├── preferences.py      # preferences dialog
 │   ├── first_run.py        # first-run setup
 │   └── spell_highlighter.py
-└── resources/icons/
-    └── skribe.svg          # application icon
+└── resources/
+    ├── icons/
+    │   └── skribe.svg      # application icon
+    └── textures/
+        └── cork.jpg        # corkboard background tile
 ```
+
+`skribe.spec` at the repo root drives the PyInstaller build described above.
 
 ## Status
 
