@@ -19,6 +19,7 @@ Skribe is deliberately a small subset of Scrivener — the features one writer a
 - Configurable default font, first-line paragraph indent, and paragraph spacing.
 - Auto-indent: every new paragraph inherits the configured indent.
 - Per-document cursor position is saved on every project switch.
+- Zoomable: apparent font size can be zoomed for the best writing and editing experience.
 
 ### Spell-check
 - Inline spell-check via pyenchant + hunspell (red-underline highlighter).
