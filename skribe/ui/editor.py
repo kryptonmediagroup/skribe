@@ -350,7 +350,15 @@ class EditorWidget(QWidget):
         self._spell_highlighter.refresh()
 
     def apply_theme(self, theme: Theme) -> None:
-        self._text.setPalette(editor_palette(theme, self._text.palette()))
+        # QTextEdit is a QAbstractScrollArea — the text area is its viewport.
+        # Setting the palette on the outer widget alone does not reliably
+        # repaint the viewport's Base/Text on a live theme switch (only on
+        # first show), so push the palette to the viewport and request a
+        # repaint explicitly.
+        new_pal = editor_palette(theme, self._text.palette())
+        self._text.setPalette(new_pal)
+        self._text.viewport().setPalette(new_pal)
+        self._text.viewport().update()
 
     # --- comments API -----------------------------------------------
 

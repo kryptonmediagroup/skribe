@@ -858,6 +858,7 @@ class MainWindow(QMainWindow):
         from skribe.themes import apply_theme
         apply_theme(theme)
         self._editor.apply_theme(theme)
+        self._corkboard.apply_theme(theme)
 
     def _apply_current_settings(self) -> None:
         """Called after the Preferences dialog writes new values."""
