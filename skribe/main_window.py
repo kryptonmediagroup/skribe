@@ -71,7 +71,7 @@ from skribe.themes import theme_for
 from skribe.ui.binder_view import BinderView
 from skribe.ui.comments_panel import CommentsPanel
 from skribe.ui.corkboard_view import CorkboardView
-from skribe.ui.editor import EditorWidget
+from skribe.ui.editor import EditorWidget, ZOOM_PRESETS
 from skribe.ui.inspector import InspectorWidget
 from skribe.ui.compile_dialog import CompileDialog
 from skribe.ui.preferences import PreferencesDialog
@@ -354,6 +354,9 @@ class MainWindow(QMainWindow):
             self._act_view_editor.setChecked(True)
 
         view_menu.addSeparator()
+        self._build_zoom_menu(view_menu)
+
+        view_menu.addSeparator()
         self._act_spellcheck = QAction("Check &Spelling", self, checkable=True)
         self._act_spellcheck.setShortcut(QKeySequence("Ctrl+Shift+;"))
         self._act_spellcheck.setChecked(bool(self._settings.get(Keys.SPELLCHECK_ENABLED)))
@@ -391,6 +394,56 @@ class MainWindow(QMainWindow):
         act.setShortcut(shortcut)
         act.triggered.connect(lambda: self._editor_method(method))
         return act
+
+    # --- view → zoom --------------------------------------------------
+
+    def _build_zoom_menu(self, view_menu: QMenu) -> None:
+        zoom_menu = view_menu.addMenu("&Zoom")
+
+        act_zoom_in = QAction("Zoom &In", self)
+        # Two shortcuts for the same action: Ctrl+= is what most apps emit
+        # for the unshifted "+" key, Ctrl++ is what some keyboards send.
+        act_zoom_in.setShortcuts([QKeySequence("Ctrl+="), QKeySequence("Ctrl++")])
+        act_zoom_in.triggered.connect(self._editor.zoom_in)
+        zoom_menu.addAction(act_zoom_in)
+
+        act_zoom_out = QAction("Zoom &Out", self)
+        act_zoom_out.setShortcut(QKeySequence("Ctrl+-"))
+        act_zoom_out.triggered.connect(self._editor.zoom_out)
+        zoom_menu.addAction(act_zoom_out)
+
+        act_zoom_reset = QAction("&Reset Zoom", self)
+        act_zoom_reset.setShortcut(QKeySequence("Ctrl+0"))
+        act_zoom_reset.triggered.connect(self._editor.reset_zoom)
+        zoom_menu.addAction(act_zoom_reset)
+
+        zoom_menu.addSeparator()
+
+        self._zoom_action_group = QActionGroup(self)
+        self._zoom_action_group.setExclusive(True)
+        self._zoom_preset_actions: dict[int, QAction] = {}
+        for percent in ZOOM_PRESETS:
+            act = QAction(f"{percent}%", self, checkable=True)
+            act.triggered.connect(
+                lambda _checked=False, p=percent: self._editor.set_zoom_percent(p)
+            )
+            self._zoom_action_group.addAction(act)
+            zoom_menu.addAction(act)
+            self._zoom_preset_actions[percent] = act
+
+        self._editor.zoom_changed.connect(self._sync_zoom_menu)
+        self._sync_zoom_menu(self._editor.zoom_percent())
+
+    def _sync_zoom_menu(self, percent: int) -> None:
+        act = self._zoom_preset_actions.get(int(percent))
+        if act is not None:
+            act.setChecked(True)
+        else:
+            # Custom (non-preset) zoom: clear the exclusive group so no
+            # preset shows a stale check.
+            checked = self._zoom_action_group.checkedAction()
+            if checked is not None:
+                checked.setChecked(False)
 
     def _editor_method(self, name: str) -> None:
         te = self._editor.findChild(QTextEdit)

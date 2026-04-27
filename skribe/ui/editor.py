@@ -55,6 +55,16 @@ COMMENT_HIGHLIGHT_COLOR = QColor("#FFF59D")  # soft yellow
 # two can coexist on the same run without ambiguity.
 SEARCH_HIGHLIGHT_COLOR = QColor("#80DEEA")  # soft cyan
 
+# Zoom presets mirror Scrivener's View → Zoom menu. The list is the only
+# source of truth for zoom_in/zoom_out cycling and for the View → Zoom
+# submenu items in main_window.
+ZOOM_PRESETS: tuple[int, ...] = (
+    50, 75, 90, 100, 110, 125, 150, 175, 200, 300, 400, 600, 800,
+)
+ZOOM_DEFAULT = 100
+ZOOM_MIN = ZOOM_PRESETS[0]
+ZOOM_MAX = ZOOM_PRESETS[-1]
+
 
 class _Editor(QTextEdit):
     """QTextEdit subclass that belt-and-suspenders the text-indent on new blocks."""
@@ -134,6 +144,10 @@ class _Editor(QTextEdit):
         menu.exec(event.globalPos())
 
 
+def _clamp_zoom(percent: int) -> int:
+    return max(ZOOM_MIN, min(ZOOM_MAX, int(percent)))
+
+
 def _comment_id_at(document, position: int) -> Optional[str]:
     """Return the comment UUID of whatever fragment covers ``position``."""
     block = document.findBlock(position)
@@ -165,13 +179,15 @@ class EditorWidget(QWidget):
     comment_anchor_requested = Signal(str)  # comment uuid — emitted on caret/selection
     comment_remove_requested = Signal(str)  # comment uuid — from right-click menu
     comment_add_requested = Signal()        # from right-click menu on a selection
+    zoom_changed = Signal(int)              # current zoom percent (e.g. 125)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._settings = app_settings()
+        self._zoom_percent = _clamp_zoom(int(self._settings.get(Keys.VIEW_ZOOM_PERCENT)))
 
         self._text = _Editor(self)
-        self._text.setFont(self._default_font())
+        self._apply_zoom_to_view()
 
         # Spell-check pipeline. The checker is None when pyenchant/hunspell
         # is unavailable; the highlighter handles that quietly.
@@ -252,7 +268,7 @@ class EditorWidget(QWidget):
 
     def reload_settings(self) -> None:
         """Re-read settings (font, indent) and re-apply to the current document."""
-        self._text.setFont(self._default_font())
+        self._apply_zoom_to_view()
         # Update toolbar font widgets to match.
         self._font_combo.blockSignals(True)
         self._size_spin.blockSignals(True)
@@ -516,6 +532,50 @@ class EditorWidget(QWidget):
         self.set_cursor_position(position)
         self._text.ensureCursorVisible()
 
+    # --- zoom API ----------------------------------------------------
+
+    def zoom_percent(self) -> int:
+        return self._zoom_percent
+
+    def set_zoom_percent(self, percent: int) -> None:
+        """Set zoom to an arbitrary percent (clamped). 100 = unscaled."""
+        new = _clamp_zoom(int(percent))
+        if new == self._zoom_percent:
+            return
+        self._zoom_percent = new
+        self._settings.set(Keys.VIEW_ZOOM_PERCENT, new)
+        self._apply_zoom_to_view()
+        self.zoom_changed.emit(new)
+
+    def zoom_in(self) -> None:
+        """Step up to the next preset above the current zoom."""
+        for preset in ZOOM_PRESETS:
+            if preset > self._zoom_percent:
+                self.set_zoom_percent(preset)
+                return
+
+    def zoom_out(self) -> None:
+        """Step down to the next preset below the current zoom."""
+        for preset in reversed(ZOOM_PRESETS):
+            if preset < self._zoom_percent:
+                self.set_zoom_percent(preset)
+                return
+
+    def reset_zoom(self) -> None:
+        self.set_zoom_percent(ZOOM_DEFAULT)
+
+    def _apply_zoom_to_view(self) -> None:
+        """Push the configured base font, scaled by zoom, onto the QTextEdit.
+
+        Only the *display* font scales; block-level metrics (indent,
+        paragraph spacing) are computed against the unzoomed font so the
+        values stamped into the document don't drift across zoom changes.
+        """
+        base = self._default_font()
+        scaled = QFont(base)
+        scaled.setPointSizeF(base.pointSize() * self._zoom_percent / 100.0)
+        self._text.setFont(scaled)
+
     # --- helpers used by _Editor -------------------------------------
 
     def auto_indent_enabled(self) -> bool:
@@ -525,7 +585,9 @@ class EditorWidget(QWidget):
         em = float(self._settings.get(Keys.EDITOR_FIRST_LINE_INDENT_EM))
         if em <= 0:
             return 0.0
-        metrics = QFontMetricsF(self._text.font())
+        # Always compute from the *unzoomed* font: this value gets baked
+        # into block formats, and we don't want it to drift with zoom.
+        metrics = QFontMetricsF(self._default_font())
         em_width = metrics.horizontalAdvance("M") or metrics.averageCharWidth() or 8.0
         return em * em_width
 
@@ -533,7 +595,7 @@ class EditorWidget(QWidget):
         lines = float(self._settings.get(Keys.EDITOR_PARAGRAPH_SPACING_LINES))
         if lines <= 0:
             return 0.0
-        return lines * QFontMetricsF(self._text.font()).lineSpacing()
+        return lines * QFontMetricsF(self._default_font()).lineSpacing()
 
     # --- internals ---------------------------------------------------
 

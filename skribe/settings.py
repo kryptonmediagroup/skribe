@@ -48,6 +48,7 @@ class Keys:
 
     # View
     VIEW_MODE = "view/center_pane_mode"  # "editor" | "corkboard"
+    VIEW_ZOOM_PERCENT = "view/zoom_percent"  # editor display zoom, integer percent
 
     # Window
     MAIN_GEOMETRY = "mainwindow/geometry"
@@ -77,6 +78,7 @@ DEFAULTS: dict[str, Any] = {
     Keys.SPELLCHECK_LANGUAGE: "en_US",
 
     Keys.VIEW_MODE: "editor",
+    Keys.VIEW_ZOOM_PERCENT: 100,
 }
 
 
