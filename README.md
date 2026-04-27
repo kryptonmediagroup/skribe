@@ -125,4 +125,9 @@ skribe/
 ## Status
 
 Skribe is built for one writer's workflow on his own machines. There's no test suite, no plugin API, no release schedule. Bugs get fixed when they get in the way of writing.
+
 Also, while I could release this to the public, I'm specifically not going to, because the people at LiteratureAndLatte.com deserve to make a living and have a life, and releasing this would be a major f-ing problem for them. - GT
+
+## License
+
+Skribe is released under the [GNU General Public License, version 3](LICENSE) (or, at your option, any later version).
