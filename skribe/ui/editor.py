@@ -222,13 +222,43 @@ class EditorWidget(QWidget):
 
     def set_html(self, html: str) -> None:
         self._text.blockSignals(True)
-        self._text.setHtml(html or "")
-        self._apply_default_block_format_to_all()
-        self._text.blockSignals(False)
+        try:
+            self._text.setHtml(html or "")
+            self._apply_default_block_format_to_all()
+            # Persisted HTML is at logical sizes; lift fragment-level point
+            # sizes up to display scale so explicit-size text is visible
+            # at the current zoom. setHtml also resets the document's
+            # default font from the body styling, so re-apply the zoomed
+            # default font for any text without an explicit size.
+            if self._zoom_percent != ZOOM_DEFAULT:
+                self._apply_zoom_to_view()
+                self._scale_char_format_sizes(self._zoom_percent / 100.0)
+        finally:
+            self._text.blockSignals(False)
         self._sync_toolbar_state()
 
     def html(self) -> str:
-        return self._text.toHtml()
+        if self._zoom_percent == ZOOM_DEFAULT:
+            return self._text.toHtml()
+        # Snapshot at logical sizes, then restore display sizes. Both the
+        # default font (which Qt embeds in the <body> style) and every
+        # fragment's explicit point size have to come down to logical
+        # scale so the persisted HTML reloads identically at any zoom.
+        doc = self._text.document()
+        was_modified = doc.isModified()
+        scaled_font = self._text.font()
+        self._text.blockSignals(True)
+        try:
+            self._text.setFont(self._default_font())
+            self._scale_char_format_sizes(100.0 / self._zoom_percent)
+            try:
+                return self._text.toHtml()
+            finally:
+                self._scale_char_format_sizes(self._zoom_percent / 100.0)
+                self._text.setFont(scaled_font)
+        finally:
+            self._text.blockSignals(False)
+            doc.setModified(was_modified)
 
     def plain_text(self) -> str:
         return self._text.toPlainText()
@@ -542,9 +572,23 @@ class EditorWidget(QWidget):
         new = _clamp_zoom(int(percent))
         if new == self._zoom_percent:
             return
+        ratio = new / self._zoom_percent
         self._zoom_percent = new
         self._settings.set(Keys.VIEW_ZOOM_PERCENT, new)
         self._apply_zoom_to_view()
+        # Default-font scaling alone isn't enough: Qt's HTML round-trip
+        # stamps explicit FontPointSize on every fragment, which overrides
+        # the default font. Walk the document and scale those by ``ratio``
+        # so explicit-size text follows the zoom too.
+        doc = self._text.document()
+        was_modified = doc.isModified()
+        self._text.blockSignals(True)
+        try:
+            self._scale_char_format_sizes(ratio)
+        finally:
+            self._text.blockSignals(False)
+            doc.setModified(was_modified)
+        self._sync_toolbar_state()
         self.zoom_changed.emit(new)
 
     def zoom_in(self) -> None:
@@ -575,6 +619,45 @@ class EditorWidget(QWidget):
         scaled = QFont(base)
         scaled.setPointSizeF(base.pointSize() * self._zoom_percent / 100.0)
         self._text.setFont(scaled)
+
+    def _scale_char_format_sizes(self, ratio: float) -> None:
+        """Multiply every fragment's explicit FontPointSize by ``ratio``.
+
+        Caller is expected to manage signal blocking and the document's
+        modification flag; this helper just walks the document.
+        """
+        if ratio == 1.0:
+            return
+        doc = self._text.document()
+        cursor = QTextCursor(doc)
+        cursor.beginEditBlock()
+        try:
+            block = doc.firstBlock()
+            while block.isValid():
+                it = block.begin()
+                while not it.atEnd():
+                    frag = it.fragment()
+                    fmt = frag.charFormat()
+                    size = fmt.fontPointSize()
+                    if size > 0:
+                        new_fmt = QTextCharFormat()
+                        new_fmt.setFontPointSize(size * ratio)
+                        cursor.setPosition(frag.position())
+                        cursor.setPosition(
+                            frag.position() + frag.length(),
+                            QTextCursor.KeepAnchor,
+                        )
+                        cursor.mergeCharFormat(new_fmt)
+                    it += 1
+                block = block.next()
+        finally:
+            cursor.endEditBlock()
+
+    def _logical_to_display_pt(self, logical: float) -> float:
+        return logical * self._zoom_percent / 100.0
+
+    def _display_to_logical_pt(self, display: float) -> float:
+        return display * 100.0 / self._zoom_percent
 
     # --- helpers used by _Editor -------------------------------------
 
@@ -744,7 +827,10 @@ class EditorWidget(QWidget):
 
     def _on_font_size_changed(self, size: int) -> None:
         fmt = QTextCharFormat()
-        fmt.setFontPointSize(float(size))
+        # Spinner is in logical units; what we stamp on the char format
+        # has to be at display scale so the visible result honors the
+        # user's choice at the current zoom.
+        fmt.setFontPointSize(self._logical_to_display_pt(float(size)))
         self._merge_char_format(fmt)
 
     def _set_list(self, style: QTextListFormat.Style) -> None:
@@ -760,6 +846,9 @@ class EditorWidget(QWidget):
         cursor = self._text.textCursor()
         block_fmt = cursor.blockFormat()
         char_fmt = QTextCharFormat()
+        # Heading sizes are derived from the logical default so they
+        # round-trip through save/load without drifting with zoom.
+        base_logical = float(self._settings.get(Keys.EDITOR_FONT_SIZE))
         if level == 0:
             block_fmt.setHeadingLevel(0)
             if self.auto_indent_enabled():
@@ -767,13 +856,14 @@ class EditorWidget(QWidget):
             else:
                 block_fmt.setTextIndent(0.0)
             char_fmt.setFontWeight(QFont.Normal)
-            char_fmt.setFontPointSize(self._text.font().pointSize())
+            char_fmt.setFontPointSize(self._logical_to_display_pt(base_logical))
         else:
             block_fmt.setHeadingLevel(level)
             # Headings should not have a first-line indent.
             block_fmt.setTextIndent(0.0)
             char_fmt.setFontWeight(QFont.Bold)
-            char_fmt.setFontPointSize(self._text.font().pointSize() + (6 - level * 2))
+            logical = base_logical + (6 - level * 2)
+            char_fmt.setFontPointSize(self._logical_to_display_pt(logical))
         cursor.setBlockFormat(block_fmt)
         cursor.select(QTextCursor.BlockUnderCursor)
         cursor.mergeCharFormat(char_fmt)
@@ -790,10 +880,13 @@ class EditorWidget(QWidget):
         fam = font.family() or self._default_font().family()
         if fam:
             self._font_combo.setCurrentFont(QFont(fam))
-        size = font.pointSize()
-        if size <= 0:
-            size = self._size_spin.value()
-        self._size_spin.setValue(size)
+        display_size = font.pointSizeF() if font.pointSizeF() > 0 else float(font.pointSize())
+        if display_size <= 0:
+            # No explicit size on this run — show the configured logical default.
+            logical = int(self._settings.get(Keys.EDITOR_FONT_SIZE))
+        else:
+            logical = max(1, round(self._display_to_logical_pt(display_size)))
+        self._size_spin.setValue(logical)
         self._font_combo.blockSignals(False)
         self._size_spin.blockSignals(False)
 
