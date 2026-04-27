@@ -1,6 +1,6 @@
 # Skribe
 
-A personal, cross-platform writing environment in the spirit of Scrivener 3. Built with Python 3 and PySide6 (Qt 6), so it runs on Linux, macOS, Windows, and the Raspberry Pi 5. Skribe is intended as a parallel work flow to Scrivener, allowing you to read, modify and write Scrivener files as part of your work flow as a novelist or writer of short stories on systems that would not ordinarily support Scrivener.
+A personal, cross-platform writing environment in the spirit of Scrivener 3. Built with Python 3 and PySide6 (Qt 6), so it runs on Linux, macOS, Windows, and the Raspberry Pi 5. Skribe is intended as a parallel work flow to Scrivener, allowing you to read, modify and write Scrivener files as part of your work flow as a novelist or writer of short stories on systems that would not ordinarily support Scrivener. My feeling is that having Skribe accessible might actually influence people to buy Scrivener where they otherwise wouldn't, because while cannot supplant the original, it does branch part of the Scrivener writer's workflow into a Linux environment.
 
 Skribe is deliberately a small subset of Scrivener — the features one writer actually reaches for, day in and day out, with none of the screenplay/teleplay, format-preset, or section-layout machinery. When something needs that level of polish, the **Export to Scrivener** path round-trips the project so the heavy lifting can happen there.
 
