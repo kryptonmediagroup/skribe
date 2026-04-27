@@ -28,9 +28,14 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QComboBox,
     QFontComboBox,
+    QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QMenu,
     QSpinBox,
     QTextEdit,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -204,15 +209,18 @@ class EditorWidget(QWidget):
             )
 
         self._toolbar = self._build_toolbar()
+        self._footer = self._build_footer()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._toolbar)
         layout.addWidget(self._text)
+        layout.addWidget(self._footer)
 
         self._text.textChanged.connect(self.contents_changed.emit)
         self._text.cursorPositionChanged.connect(self._sync_toolbar_state)
+        self.zoom_changed.connect(self._refresh_zoom_widget)
         self._text.cursorPositionChanged.connect(self._emit_comment_at_cursor)
         self._text.selectionChanged.connect(self.selection_changed.emit)
 
@@ -795,6 +803,68 @@ class EditorWidget(QWidget):
         tb.addAction(act_justify)
 
         return tb
+
+    # --- footer (zoom widget) ----------------------------------------
+
+    def _build_footer(self) -> QWidget:
+        """Thin status-bar-like strip below the editor with a zoom picker.
+
+        The button shows the current zoom; clicking it pops up a menu of
+        Scrivener-style presets (descending) plus an Other... entry that
+        prompts for any value within the clamp range.
+        """
+        bar = QFrame(self)
+        bar.setFrameShape(QFrame.NoFrame)
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(8, 2, 8, 2)
+        h.setSpacing(0)
+
+        self._zoom_button = QToolButton(bar)
+        self._zoom_button.setAutoRaise(True)
+        self._zoom_button.setPopupMode(QToolButton.InstantPopup)
+        self._zoom_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self._zoom_button.setToolTip("Editor zoom")
+
+        menu = QMenu(self._zoom_button)
+        self._zoom_button_actions: dict[int, QAction] = {}
+        # Scrivener orders the popup top-down from largest to smallest.
+        for percent in reversed(ZOOM_PRESETS):
+            act = QAction(f"{percent}%", menu)
+            act.setCheckable(True)
+            act.triggered.connect(
+                lambda _checked=False, p=percent: self.set_zoom_percent(p)
+            )
+            menu.addAction(act)
+            self._zoom_button_actions[percent] = act
+        menu.addSeparator()
+        act_other = QAction("&Other…", menu)
+        act_other.triggered.connect(self._on_zoom_other)
+        menu.addAction(act_other)
+        self._zoom_button.setMenu(menu)
+
+        h.addWidget(self._zoom_button)
+        h.addStretch(1)
+
+        self._refresh_zoom_widget(self._zoom_percent)
+        return bar
+
+    def _refresh_zoom_widget(self, percent: int) -> None:
+        self._zoom_button.setText(f"{percent}%")
+        for p, act in self._zoom_button_actions.items():
+            act.setChecked(p == percent)
+
+    def _on_zoom_other(self) -> None:
+        value, ok = QInputDialog.getInt(
+            self,
+            "Set Zoom Level",
+            "Zoom percent:",
+            self._zoom_percent,
+            ZOOM_MIN,
+            ZOOM_MAX,
+            5,
+        )
+        if ok:
+            self.set_zoom_percent(value)
 
     # --- character-format helpers ------------------------------------
 
