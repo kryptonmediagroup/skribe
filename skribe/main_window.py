@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QSettings, Qt
+from PySide6.QtCore import QPoint, QSettings, QThread, Signal, Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
@@ -200,6 +200,15 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self._word_count_label)
         self.statusBar().addPermanentWidget(right_spacer, 1)
 
+        # TTS stop button - hidden by default, shown when speaking
+        self._tts_stop_button = QToolButton(self)
+        self._tts_stop_button.setText("Stop")
+        self._tts_stop_button.setToolTip("Stop text-to-speech playback")
+        self._tts_stop_button.setAutoRaise(True)
+        self._tts_stop_button.setVisible(False)
+        self._tts_stop_button.clicked.connect(self._stop_tts)
+        self._tts_worker: Optional[_TTSWorker] = None
+
         self._build_menus()
         self._wire_signals()
         self._restore_window_state()
@@ -243,6 +252,12 @@ class MainWindow(QMainWindow):
         self._comments_panel.comment_selected.connect(self._on_comment_selected)
         self._corkboard.card_activated.connect(self._on_corkboard_activated)
         self._corkboard.context_menu_requested.connect(self._on_corkboard_context_menu)
+
+        # TTS: editor's read-selection request (from context menu)
+        self._editor.read_selection_requested.connect(self._action_read_selection)
+
+        # TTS worker signals
+        # (connected/disconnected per-session in _start_tts/_stop_tts)
 
     def _build_menus(self) -> None:
         mb = self.menuBar()
@@ -325,6 +340,12 @@ class MainWindow(QMainWindow):
         act_add_comment.triggered.connect(self._action_add_comment)
         edit_menu.addAction(act_add_comment)
         self._act_add_comment = act_add_comment
+
+        edit_menu.addSeparator()
+        act_read_selection = QAction("&Read Selection", self)
+        act_read_selection.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        act_read_selection.triggered.connect(self._action_read_selection)
+        edit_menu.addAction(act_read_selection)
 
         edit_menu.addSeparator()
         act_prefs = QAction("&Preferences…", self)
@@ -837,6 +858,56 @@ class MainWindow(QMainWindow):
         self._comments_dirty = True
         self._comments_panel.add_comment(comment)
         self.statusBar().showMessage(f"Comment added ({initials}).", 2000)
+
+    def _action_read_selection(self) -> None:
+        """Read selected text aloud using text-to-speech."""
+        if not self._editor.has_selection():
+            self.statusBar().showMessage("Select some text to read.", 3000)
+            return
+
+        selected_text = self._editor.selected_text()
+        if not selected_text.strip():
+            self.statusBar().showMessage("Select some text to read.", 3000)
+            return
+
+        self._start_tts(selected_text)
+
+    def _start_tts(self, text: str) -> None:
+        """Start text-to-speech playback for the given text."""
+        # Stop any existing playback
+        self._stop_tts()
+
+        self._tts_worker = _TTSWorker(text)
+        self._tts_worker.started_speaking.connect(self._on_tts_started)
+        self._tts_worker.finished_speaking.connect(self._on_tts_finished)
+        self._tts_worker.start()
+
+    def _stop_tts(self) -> None:
+        """Stop text-to-speech playback."""
+        if self._tts_worker:
+            self._tts_worker.stop()
+            self._tts_worker.wait()
+            self._tts_worker = None
+        self._hide_tts_stop_button()
+
+    def _on_tts_started(self) -> None:
+        """Called when TTS playback starts."""
+        self._show_tts_stop_button()
+        self.statusBar().showMessage("Reading selection...", 0)
+
+    def _on_tts_finished(self) -> None:
+        """Called when TTS playback finishes."""
+        self._hide_tts_stop_button()
+        self.statusBar().showMessage("Finished.", 2000)
+
+    def _show_tts_stop_button(self) -> None:
+        """Show the stop button in the status bar."""
+        self.statusBar().addPermanentWidget(self._tts_stop_button)
+        self._tts_stop_button.setVisible(True)
+
+    def _hide_tts_stop_button(self) -> None:
+        """Hide the stop button in the status bar."""
+        self._tts_stop_button.setVisible(False)
 
     def _action_preferences(self) -> None:
         dlg = PreferencesDialog(self)
@@ -1414,3 +1485,84 @@ class MainWindow(QMainWindow):
         s = QSettings(APP_ORG, APP_NAME)
         s.setValue(Keys.MAIN_GEOMETRY, self.saveGeometry())
         s.setValue(Keys.MAIN_STATE, self.saveState())
+
+
+class _TTSWorker(QThread):
+    """Text-to-speech worker that runs in a background thread.
+
+    Uses pyttsx3 for offline, cross-platform TTS. The engine is created
+    in the worker thread to avoid cross-thread signal/slot issues.
+    """
+
+    started_speaking = Signal()
+    finished_speaking = Signal()
+
+    def __init__(self, text: str):
+        super().__init__()
+        self._text = text
+        self._engine = None
+        self._stop_requested = False
+
+    def run(self) -> None:
+        import os
+        import wave
+        import subprocess
+
+        try:
+            from piper import PiperVoice
+
+            voice_path = os.path.expanduser("~/.local/share/piper/voices/en_US-lessac-medium.onnx")
+            if not os.path.exists(voice_path):
+                print("Piper voice not found", file=sys.stderr)
+                self.finished_speaking.emit()
+                return
+
+            self._voice = PiperVoice.load(voice_path)
+
+            temp_path = os.path.expanduser("~/.cache/skribe/tts.wav")
+            os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+
+            with wave.open(temp_path, 'wb') as wav_file:
+                self._voice.synthesize_wav(self._text, wav_file)
+
+            if self._stop_requested:
+                os.unlink(temp_path)
+                self.finished_speaking.emit()
+                return
+
+            self.started_speaking.emit()
+
+            self._aplay_proc = subprocess.Popen(['aplay', '-q', temp_path])
+            self._aplay_proc.wait()
+
+            os.unlink(temp_path)
+        except ImportError:
+            import sys
+            print("Piper TTS not installed", file=sys.stderr)
+        except Exception as e:
+            import sys
+            print(f"TTS error: {e}", file=sys.stderr)
+        finally:
+            self.finished_speaking.emit()
+            self._aplay_proc = None
+
+    def stop(self) -> None:
+        """Request immediate stop of TTS playback."""
+        self._stop_requested = True
+        if hasattr(self, '_aplay_proc') and self._aplay_proc and self._aplay_proc.poll() is None:
+            self._aplay_proc.terminate()
+            try:
+                self._aplay_proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self._aplay_proc.kill()
+
+    def _on_started(self) -> None:
+        self.started_speaking.emit()
+
+    def _on_finished(self) -> None:
+        self.finished_speaking.emit()
+
+    def _on_error(self, e: Exception) -> None:
+        # Silently ignore TTS errors - the feature simply won't work
+        # if the engine isn't available on this system
+        pass

@@ -142,6 +142,12 @@ class _Editor(QTextEdit):
             menu.insertAction(first, act_remove)
             menu.insertSeparator(first)
         elif self.textCursor().hasSelection():
+            # Read Selection option
+            act_read = QAction("Read Selection", menu)
+            act_read.triggered.connect(self._owner.read_selection)
+            menu.insertAction(first, act_read)
+            menu.insertSeparator(first)
+
             act_add = QAction("Add Comment", menu)
             act_add.triggered.connect(self._owner.comment_add_requested.emit)
             menu.insertAction(first, act_add)
@@ -185,6 +191,7 @@ class EditorWidget(QWidget):
     comment_remove_requested = Signal(str)  # comment uuid — from right-click menu
     comment_add_requested = Signal()        # from right-click menu on a selection
     zoom_changed = Signal(int)              # current zoom percent (e.g. 125)
+    read_selection_requested = Signal()     # from right-click menu or shortcut
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -285,6 +292,10 @@ class EditorWidget(QWidget):
     def clear(self) -> None:
         self.set_html("")
         self._text.setEnabled(False)
+
+    def read_selection(self) -> None:
+        """Emit signal to read selected text aloud via TTS."""
+        self.read_selection_requested.emit()
 
     def set_editable(self, editable: bool) -> None:
         self._text.setEnabled(editable)
@@ -418,6 +429,9 @@ class EditorWidget(QWidget):
 
     def has_selection(self) -> bool:
         return self._text.textCursor().hasSelection()
+
+    def selected_text(self) -> str:
+        return self._text.textCursor().selectedText().replace("\u2029", "\n")
 
     def new_comment_from_selection(self) -> Optional[tuple[str, int, int, str]]:
         """Highlight the current selection as a new comment anchor.
