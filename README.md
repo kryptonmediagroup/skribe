@@ -20,6 +20,7 @@ Skribe is deliberately a small subset of Scrivener — the features one writer a
 - Auto-indent: every new paragraph inherits the configured indent.
 - Per-document cursor position is saved on every project switch.
 - The edit pane is zoomable, with apparent font size chageable on the fly for the best writing and editing experience.
+- Supports text to speech - hear your wondrous prose spoken aloud.  Great for finding problems with phrasing, missing words or repetition.
 
 ### Spell-check
 - Inline spell-check via pyenchant + hunspell (red-underline highlighter).
