@@ -14,6 +14,7 @@ from skribe.model.project import BinderItem, ItemType
 class BinderView(QTreeView):
     add_requested = Signal(QModelIndex, ItemType)
     delete_requested = Signal(QModelIndex)
+    print_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,6 +74,13 @@ class BinderView(QTreeView):
         act_delete.setEnabled(item is not None and not item.type.is_root_container)
         act_delete.triggered.connect(lambda: self._confirm_delete(index))
         menu.addAction(act_delete)
+
+        menu.addSeparator()
+
+        act_print = QAction("Print", self)
+        act_print.setEnabled(item is not None)
+        act_print.triggered.connect(self.print_requested)
+        menu.addAction(act_print)
 
         menu.exec(self.viewport().mapToGlobal(pos))
 

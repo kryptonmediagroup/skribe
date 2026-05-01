@@ -62,6 +62,24 @@ class BinderModel(QAbstractItemModel):
         row = parent.children.index(item)
         return self.createIndex(row, 0, item)
 
+    def index_from_uuid(self, uuid: str) -> QModelIndex:
+        """Find the model index for an item with the given uuid."""
+        def find_in_children(parent_item):
+            for child in parent_item.children:
+                if child.uuid == uuid:
+                    return self.index_for_item(child)
+                found = find_in_children(child)
+                if found.isValid():
+                    return found
+            return QModelIndex()
+        for root in self._project.roots:
+            if root.uuid == uuid:
+                return self.index_for_item(root)
+            found = find_in_children(root)
+            if found.isValid():
+                return found
+        return QModelIndex()
+
     # --- tree navigation ---
 
     def index(self, row: int, column: int, parent: QModelIndex = QModelIndex()) -> QModelIndex:

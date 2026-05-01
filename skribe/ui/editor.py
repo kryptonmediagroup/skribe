@@ -142,7 +142,6 @@ class _Editor(QTextEdit):
             menu.insertAction(first, act_remove)
             menu.insertSeparator(first)
         elif self.textCursor().hasSelection():
-            # Read Selection option
             act_read = QAction("Read Selection", menu)
             act_read.triggered.connect(self._owner.read_selection)
             menu.insertAction(first, act_read)
@@ -152,6 +151,15 @@ class _Editor(QTextEdit):
             act_add.triggered.connect(self._owner.comment_add_requested.emit)
             menu.insertAction(first, act_add)
             menu.insertSeparator(first)
+
+        if self.textCursor().hasSelection():
+            act_print = QAction("Print Selection", menu)
+        else:
+            act_print = QAction("Print Document", menu)
+        act_print.triggered.connect(self._owner.print_requested.emit)
+        menu.insertAction(first, act_print)
+        menu.insertSeparator(first)
+
         menu.exec(event.globalPos())
 
 
@@ -179,6 +187,23 @@ def _comment_id_at(document, position: int) -> Optional[str]:
     return None
 
 
+def _strip_to_body(html: str) -> str:
+    """Reduce a QTextEdit-style document to its body content."""
+    if not html:
+        return ""
+    lo = html.lower()
+    body_start = lo.find("<body")
+    if body_start == -1:
+        return html
+    body_close = lo.find(">", body_start)
+    if body_close == -1:
+        return html
+    end = lo.rfind("</body>")
+    if end == -1:
+        end = len(html)
+    return html[body_close + 1:end]
+
+
 class EditorWidget(QWidget):
     """Rich-text editor: toolbar + QTextEdit.
 
@@ -192,6 +217,7 @@ class EditorWidget(QWidget):
     comment_add_requested = Signal()        # from right-click menu on a selection
     zoom_changed = Signal(int)              # current zoom percent (e.g. 125)
     read_selection_requested = Signal()     # from right-click menu or shortcut
+    print_requested = Signal()              # from right-click menu
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -432,6 +458,16 @@ class EditorWidget(QWidget):
 
     def selected_text(self) -> str:
         return self._text.textCursor().selectedText().replace("\u2029", "\n")
+
+    def selected_html(self) -> str:
+        cursor = self._text.textCursor()
+        if not cursor.hasSelection():
+            return ""
+        html = self._text.toHtml(cursor)
+        return _strip_to_body(html)
+
+    def document_html(self) -> str:
+        return self._text.toHtml()
 
     def new_comment_from_selection(self) -> Optional[tuple[str, int, int, str]]:
         """Highlight the current selection as a new comment anchor.

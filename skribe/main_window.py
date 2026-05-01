@@ -88,6 +88,7 @@ from skribe.ui.search_panel import (
     plain_text_from_html,
 )
 from skribe.ui.statistics import StatisticsDialog
+from skribe.ui.find_replace_dialog import FindReplaceDialog
 
 VIEW_EDITOR = "editor"
 VIEW_CORKBOARD = "corkboard"
@@ -162,6 +163,7 @@ class MainWindow(QMainWindow):
         self._search_panel: Optional[SearchPanel] = None
         self._search_query: Optional[SearchQuery] = None
         self._jump_to_first_match = False
+        self._find_replace_dialog: Optional[FindReplaceDialog] = None
 
         self._center_stack = QStackedWidget(self)
         self._center_stack.addWidget(self._editor)     # index 0
@@ -240,6 +242,7 @@ class MainWindow(QMainWindow):
         self._binder_view.selectionModel().currentChanged.connect(self._on_binder_selection)
         self._binder_view.add_requested.connect(self._on_add_requested)
         self._binder_view.delete_requested.connect(self._on_delete_requested)
+        self._binder_view.print_requested.connect(self._action_print)
         self._editor.contents_changed.connect(self._on_editor_changed)
         self._editor.selection_changed.connect(self._update_word_count)
         self._editor.comment_anchor_requested.connect(self._on_comment_anchor_requested)
@@ -255,6 +258,7 @@ class MainWindow(QMainWindow):
 
         # TTS: editor's read-selection request (from context menu)
         self._editor.read_selection_requested.connect(self._action_read_selection)
+        self._editor.print_requested.connect(self._action_print_editor)
 
         # TTS worker signals
         # (connected/disconnected per-session in _start_tts/_stop_tts)
@@ -314,6 +318,14 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        act_print = QAction("&Print…", self)
+        act_print.setShortcut(QKeySequence.Print)
+        act_print.triggered.connect(self._action_print)
+        file_menu.addAction(act_print)
+        self._act_print = act_print
+
+        file_menu.addSeparator()
+
         act_quit = QAction("&Quit", self)
         act_quit.setShortcut(QKeySequence.Quit)
         act_quit.triggered.connect(self.close)
@@ -333,6 +345,21 @@ class MainWindow(QMainWindow):
         act_find_project.setShortcut(QKeySequence("Ctrl+Shift+F"))
         act_find_project.triggered.connect(self._action_find_in_project)
         edit_menu.addAction(act_find_project)
+
+        act_find_replace = QAction("&Find and Replace…", self)
+        act_find_replace.setShortcut(QKeySequence("Ctrl+F"))
+        act_find_replace.triggered.connect(self._action_find_replace)
+        edit_menu.addAction(act_find_replace)
+
+        act_find_next = QAction("Find &Next", self)
+        act_find_next.setShortcut(QKeySequence("F3"))
+        act_find_next.triggered.connect(self._action_find_next)
+        edit_menu.addAction(act_find_next)
+
+        act_find_prev = QAction("Find &Previous", self)
+        act_find_prev.setShortcut(QKeySequence("Shift+F3"))
+        act_find_prev.triggered.connect(self._action_find_prev)
+        edit_menu.addAction(act_find_prev)
 
         edit_menu.addSeparator()
         act_add_comment = QAction("Add &Comment", self)
@@ -753,6 +780,22 @@ class MainWindow(QMainWindow):
             return
         self._compile_to_file(result.fmt, html, result.options)
 
+    def _action_print(self) -> None:
+        """Print the currently selected Binder items."""
+        if self._project is None:
+            QMessageBox.information(self, "Print", "Open or create a project first.")
+            return
+        items = self._selected_binder_items()
+        if not items:
+            QMessageBox.information(
+                self, "Print", "Select at least one item in the Binder to print."
+            )
+            return
+        self._flush_current_editor()
+        options = CompileOptions(items=items, project_title=self._project.name or "")
+        html = build_compile_html(options, self._read_body_for_compile)
+        self._compile_to_printer(html)
+
     def _compile_to_printer(self, html: str) -> None:
         from PySide6.QtPrintSupport import QPrintDialog, QPrinter
         printer = QPrinter(QPrinter.HighResolution)
@@ -765,6 +808,15 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Compile", f"Print failed:\n{exc}")
             return
         self.statusBar().showMessage("Sent to printer.", 3000)
+
+    def _print_from_html(self, html: str) -> None:
+        if not html:
+            QMessageBox.information(self, "Print", "Nothing to print.")
+            return
+        if not html.strip():
+            QMessageBox.information(self, "Print", "Nothing to print.")
+            return
+        self._compile_to_printer(html)
 
     def _compile_to_file(self, fmt: str, html: str, options: CompileOptions) -> None:
         ext = file_extension(fmt) or ""
@@ -871,6 +923,14 @@ class MainWindow(QMainWindow):
             return
 
         self._start_tts(selected_text)
+
+    def _action_print_editor(self) -> None:
+        """Print the current editor content or selected text."""
+        if self._editor.has_selection():
+            html = self._editor.selected_html()
+        else:
+            html = self._editor.document_html()
+        self._print_from_html(html)
 
     def _start_tts(self, text: str) -> None:
         """Start text-to-speech playback for the given text."""
@@ -1111,6 +1171,125 @@ class MainWindow(QMainWindow):
             idx = self._left_tabs.indexOf(self._search_panel)
         self._left_tabs.setCurrentIndex(idx)
         self._search_panel.focus_term()
+
+    def _action_find_replace(self) -> None:
+        """Show the Find/Replace dialog."""
+        if self._find_replace_dialog is None:
+            self._find_replace_dialog = FindReplaceDialog(
+                get_current_text=self._editor.html,
+                search_project=self._search_project_for_find,
+                parent=self,
+            )
+            self._find_replace_dialog.find_next.connect(self._on_find_next)
+            self._find_replace_dialog.replace_one.connect(self._on_replace_one)
+            self._find_replace_dialog.replace_all.connect(self._on_replace_all)
+            self._find_replace_dialog.navigate_to_doc.connect(self._on_find_navigate_to_doc)
+        self._find_replace_dialog.show_from_main_window(self._editor._text)
+
+    def _action_find_next(self) -> None:
+        """Find next occurrence (F3)."""
+        if self._find_replace_dialog is None:
+            self._action_find_replace()
+        else:
+            find_text = self._find_replace_dialog._find_edit.text()
+            if find_text:
+                self._on_find_next(find_text, True)
+
+    def _action_find_prev(self) -> None:
+        """Find previous occurrence (Shift+F3)."""
+        if self._find_replace_dialog is None:
+            self._action_find_replace()
+        else:
+            find_text = self._find_replace_dialog._find_edit.text()
+            if find_text:
+                self._on_find_next(find_text, False)
+
+    def _search_project_for_find(self, find_text: str, _case_sensitive: bool) -> list[tuple[str, str, int]]:
+        """Search all documents in the project for find_text."""
+        if self._project is None:
+            return []
+        hits: list[tuple[str, str, int]] = []
+        for item in self._project.walk():
+            if item.type.is_root_container:
+                continue
+            if self._project.path is None:
+                continue
+            html = read_document_body(self._project.path, item.uuid)
+            plain = plain_text_from_html(html or "")
+            if find_text.lower() in plain.lower():
+                count = plain.lower().count(find_text.lower())
+                hits.append((item.uuid, item.title or "", count))
+        return hits
+
+    def _on_find_next(self, find_text: str, forward: bool, whole_word: bool = False) -> None:
+        """Handle Next/Back button click."""
+        from PySide6.QtGui import QTextDocument
+        options = QTextDocument.FindFlag(0)
+        if whole_word:
+            options |= QTextDocument.FindFlag.FindWholeWords
+        if forward:
+            found = self._editor._text.find(find_text, options)
+        else:
+            cursor = self._editor._text.textCursor()
+            cursor.setPosition(cursor.selectionStart())
+            self._editor._text.setTextCursor(cursor)
+            found = self._editor._text.find(find_text, options | QTextDocument.FindFlag.FindBackward)
+        if found:
+            self._find_replace_dialog.update_status("Found match")
+        else:
+            self._find_replace_dialog.update_status("No more matches")
+
+    def _on_find_navigate_to_doc(self, uuid: str) -> None:
+        """Navigate to a document by uuid (from project search)."""
+        index = self._model.index_from_uuid(uuid)
+        if index.isValid():
+            self._binder_view.setCurrentIndex(index)
+            self._binder_view.scrollTo(index)
+            find_text = self._find_replace_dialog._find_edit.text()
+            if find_text:
+                self._on_find_next(find_text, True)
+
+    def _on_replace_one(self, find_text: str, replace_text: str, whole_word: bool = False) -> None:
+        """Replace the current selection if it matches."""
+        cursor = self._editor._text.textCursor()
+        if cursor.hasSelection():
+            selected = cursor.selectedText()
+            if whole_word:
+                matches = selected.lower() == find_text.lower()
+            else:
+                matches = find_text.lower() in selected.lower()
+            if matches:
+                cursor.insertText(replace_text)
+        self._on_find_next(find_text, True, whole_word)
+
+    def _on_replace_all(self, find_text: str, replace_text: str, search_project: bool, whole_word: bool = False) -> None:
+        """Replace all occurrences."""
+        if search_project:
+            if self._project is None or self._project.path is None:
+                return
+            self._flush_current_editor()
+            count = 0
+            for item in self._project.walk():
+                if item.type.is_root_container:
+                    continue
+                html = read_document_body(self._project.path, item.uuid)
+                plain = plain_text_from_html(html or "")
+                item_count = plain.lower().count(find_text.lower())
+                if item_count > 0:
+                    new_html = html.replace(find_text, replace_text, item_count)
+                    write_document_body(self._project.path, item.uuid, new_html)
+                    count += item_count
+            if self._current_item and self._current_item.uuid:
+                self._editor.set_html(read_document_body(self._project.path, self._current_item.uuid))
+            self._find_replace_dialog.update_status(f"Replaced {count} occurrences")
+        else:
+            text = self._editor._text.toPlainText()
+            count = text.count(find_text)
+            new_text = text.replace(find_text, replace_text)
+            cursor = self._editor._text.textCursor()
+            cursor.selectAll()
+            cursor.insertText(new_text)
+            self._find_replace_dialog.update_status(f"Replaced {count} occurrences")
 
     def _on_left_tab_close(self, index: int) -> None:
         widget = self._left_tabs.widget(index)
