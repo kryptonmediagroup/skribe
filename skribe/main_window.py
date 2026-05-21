@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QSettings, QThread, Signal, Qt
+from PySide6.QtCore import QPoint, QSettings, QThread, QTimer, Signal, Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
@@ -589,12 +589,37 @@ class MainWindow(QMainWindow):
             return
         self._load_project(project)
 
+    def _notify_save_success(self, title: str, message: str) -> None:
+        """Show a non-modal info popup that dismisses itself after 2 seconds."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle(title)
+        box.setText(message)
+        box.setStandardButtons(QMessageBox.NoButton)
+        box.setWindowModality(Qt.NonModal)
+        QTimer.singleShot(2000, box.close)
+        box.show()
+
+    def _notify_save_failure(self, title: str, message: str) -> None:
+        """Show a modal error popup the user must dismiss with OK."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Critical)
+        box.setWindowTitle(title)
+        box.setText(message)
+        box.setStandardButtons(QMessageBox.Ok)
+        box.exec()
+
     def _action_save(self) -> None:
         if self._project is None:
             return
         self._flush_current_editor()
-        save_project(self._project)
-        self._persist_ui_state()
+        try:
+            save_project(self._project)
+            self._persist_ui_state()
+        except Exception as exc:  # noqa: BLE001
+            self._notify_save_failure("Save", f"Failed to save project:\n{exc}")
+            return
+        self._notify_save_success("Save", "Project saved.")
         self.statusBar().showMessage("Saved", 2000)
 
     def _action_close(self) -> None:
@@ -714,8 +739,12 @@ class MainWindow(QMainWindow):
         try:
             export_document(body, comments, target, fmt)
         except DocExportError as exc:
-            QMessageBox.critical(self, "Export Document", str(exc))
+            self._notify_save_failure("Export Document", str(exc))
             return
+        except Exception as exc:  # noqa: BLE001
+            self._notify_save_failure("Export Document", f"Failed to export:\n{exc}")
+            return
+        self._notify_save_success("Export Document", f"Exported {target.name}.")
         self.statusBar().showMessage(f"Exported {target.name}", 3000)
 
     def _action_export_scriv(self) -> None:
@@ -746,8 +775,12 @@ class MainWindow(QMainWindow):
         try:
             export_scriv(self._project, target)
         except ScrivExportError as exc:
-            QMessageBox.critical(self, "Export to Scrivener", str(exc))
+            self._notify_save_failure("Export to Scrivener", str(exc))
             return
+        except Exception as exc:  # noqa: BLE001
+            self._notify_save_failure("Export to Scrivener", f"Failed to export:\n{exc}")
+            return
+        self._notify_save_success("Export to Scrivener", f"Exported to {target.name}.")
         self.statusBar().showMessage(f"Exported to {target.name}", 3000)
 
     def _action_compile(self) -> None:
@@ -835,8 +868,12 @@ class MainWindow(QMainWindow):
         try:
             write_compile(fmt, html, target, options)
         except CompileError as exc:
-            QMessageBox.critical(self, "Compile", str(exc))
+            self._notify_save_failure("Compile", str(exc))
             return
+        except Exception as exc:  # noqa: BLE001
+            self._notify_save_failure("Compile", f"Failed to compile:\n{exc}")
+            return
+        self._notify_save_success("Compile", f"Compiled to {target.name}.")
         self.statusBar().showMessage(f"Compiled to {target.name}", 3000)
 
     def _persist_include_changes(self, persist: dict[str, bool]) -> None:
