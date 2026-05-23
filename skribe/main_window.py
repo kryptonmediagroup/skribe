@@ -15,6 +15,8 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
@@ -23,10 +25,12 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStatusBar,
+    QStyle,
     QTabBar,
     QTabWidget,
     QTextEdit,
     QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -590,15 +594,45 @@ class MainWindow(QMainWindow):
         self._load_project(project)
 
     def _notify_save_success(self, title: str, message: str) -> None:
-        """Show a non-modal info popup that dismisses itself after 2 seconds."""
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Information)
-        box.setWindowTitle(title)
-        box.setText(message)
-        box.setStandardButtons(QMessageBox.NoButton)
-        box.setWindowModality(Qt.NonModal)
-        QTimer.singleShot(2000, box.close)
-        box.show()
+        """Show a frameless toast popup that auto-dismisses after 2 seconds."""
+        toast = QDialog(
+            self,
+            Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint,
+        )
+        toast.setAttribute(Qt.WA_DeleteOnClose, True)
+        toast.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        toast.setModal(False)
+
+        frame = QFrame(toast)
+        frame.setObjectName("toastFrame")
+        frame.setStyleSheet(
+            "#toastFrame { background: palette(window); border: 1px solid"
+            " palette(mid); border-radius: 8px; }"
+            "#toastFrame QLabel { background: transparent; }"
+        )
+        icon = QLabel(frame)
+        pix = self.style().standardIcon(QStyle.SP_DialogApplyButton).pixmap(28, 28)
+        icon.setPixmap(pix)
+        text = QLabel(f"<b>{title}</b><br>{message}", frame)
+        text.setTextFormat(Qt.RichText)
+        row = QHBoxLayout(frame)
+        row.setContentsMargins(16, 12, 20, 12)
+        row.setSpacing(12)
+        row.addWidget(icon)
+        row.addWidget(text)
+
+        outer = QVBoxLayout(toast)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(frame)
+
+        toast.adjustSize()
+        parent_geom = self.frameGeometry()
+        x = parent_geom.center().x() - toast.width() // 2
+        y = parent_geom.top() + max(60, parent_geom.height() // 8)
+        toast.move(x, y)
+
+        QTimer.singleShot(2000, toast.close)
+        toast.show()
 
     def _notify_save_failure(self, title: str, message: str) -> None:
         """Show a modal error popup the user must dismiss with OK."""
