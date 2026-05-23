@@ -70,6 +70,13 @@ ZOOM_DEFAULT = 100
 ZOOM_MIN = ZOOM_PRESETS[0]
 ZOOM_MAX = ZOOM_PRESETS[-1]
 
+# Straight → curly mapping: (opening/left, closing/right). Used by the
+# contextual smart-quote substitution in _Editor.keyPressEvent.
+_SMART_QUOTE_PAIRS = {
+    '"': ("“", "”"),
+    "'": ("‘", "’"),
+}
+
 
 class _Editor(QTextEdit):
     """QTextEdit subclass that belt-and-suspenders the text-indent on new blocks."""
@@ -80,9 +87,42 @@ class _Editor(QTextEdit):
         self.setAcceptRichText(True)
         self.setTabStopDistance(32)
 
+    def _smart_quote_for(self, straight: str) -> str:
+        """Pick the curly variant of ``straight`` based on the char before the cursor."""
+        opener, closer = _SMART_QUOTE_PAIRS[straight]
+        cursor = self.textCursor()
+        pos = cursor.selectionStart()
+        if pos <= 0:
+            return opener
+        prev = self.document().characterAt(pos - 1)
+        if not prev or prev.isspace():
+            return opener
+        return closer
+
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         text = event.text()
         is_newline = event.key() in (Qt.Key_Return, Qt.Key_Enter)
+
+        # Smart quotes: substitute curly forms based on context. Ctrl/Meta +
+        # the quote key is the escape hatch — inserts the literal straight
+        # quote so users can override the substitution for things like
+        # measurements (6' 2") or quoted code fragments.
+        key = event.key()
+        is_quote_key = key in (Qt.Key_QuoteDbl, Qt.Key_Apostrophe)
+        if is_quote_key and (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
+            literal = '"' if key == Qt.Key_QuoteDbl else "'"
+            self.textCursor().insertText(literal)
+            event.accept()
+            return
+        if (
+            text in _SMART_QUOTE_PAIRS
+            and self._owner.smart_quotes_enabled()
+            and not (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier))
+        ):
+            replacement = self._smart_quote_for(text)
+            self.textCursor().insertText(replacement)
+            event.accept()
+            return
 
         # Return on an empty, indented paragraph: Qt's default handler wipes
         # the block's first-line indent instead of inserting a new block. That
@@ -721,6 +761,9 @@ class EditorWidget(QWidget):
 
     def auto_indent_enabled(self) -> bool:
         return bool(self._settings.get(Keys.EDITOR_AUTO_INDENT))
+
+    def smart_quotes_enabled(self) -> bool:
+        return bool(self._settings.get(Keys.EDITOR_SMART_QUOTES))
 
     def current_indent_px(self) -> float:
         em = float(self._settings.get(Keys.EDITOR_FIRST_LINE_INDENT_EM))

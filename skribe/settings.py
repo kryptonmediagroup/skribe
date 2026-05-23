@@ -38,6 +38,7 @@ class Keys:
     EDITOR_FIRST_LINE_INDENT_EM = "editor/first_line_indent_em"
     EDITOR_AUTO_INDENT = "editor/auto_indent_new_paragraphs"
     EDITOR_PARAGRAPH_SPACING_LINES = "editor/paragraph_spacing_lines"
+    EDITOR_SMART_QUOTES = "editor/smart_quotes"
 
     # Appearance
     THEME = "appearance/theme"
@@ -71,6 +72,7 @@ DEFAULTS: dict[str, Any] = {
     Keys.EDITOR_FIRST_LINE_INDENT_EM: 2.0,
     Keys.EDITOR_AUTO_INDENT: True,
     Keys.EDITOR_PARAGRAPH_SPACING_LINES: 1.0,
+    Keys.EDITOR_SMART_QUOTES: True,
 
     Keys.THEME: "system",
 

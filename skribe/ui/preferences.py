@@ -120,6 +120,14 @@ class PreferencesDialog(QDialog):
         self._auto_indent = QCheckBox("Auto-indent new paragraphs", w)
         form.addRow(self._auto_indent)
 
+        self._smart_quotes = QCheckBox("Use curly (smart) quotes", w)
+        self._smart_quotes.setToolTip(
+            "Replace straight quotes with curly typographic quotes as you "
+            "type. Hold Ctrl while pressing the quote key to insert a "
+            "literal straight quote."
+        )
+        form.addRow(self._smart_quotes)
+
         self._spell_enabled = QCheckBox("Check spelling while typing", w)
         self._spell_lang = QComboBox(w)
         if spell_is_available():
@@ -163,6 +171,7 @@ class PreferencesDialog(QDialog):
         self._indent_em.setValue(float(s.get(Keys.EDITOR_FIRST_LINE_INDENT_EM)))
         self._paragraph_spacing.setValue(float(s.get(Keys.EDITOR_PARAGRAPH_SPACING_LINES)))
         self._auto_indent.setChecked(bool(s.get(Keys.EDITOR_AUTO_INDENT)))
+        self._smart_quotes.setChecked(bool(s.get(Keys.EDITOR_SMART_QUOTES)))
 
         theme_key = str(s.get(Keys.THEME))
         idx = self._theme.findData(theme_key)
@@ -193,6 +202,7 @@ class PreferencesDialog(QDialog):
         s.set(Keys.EDITOR_FIRST_LINE_INDENT_EM, float(self._indent_em.value()))
         s.set(Keys.EDITOR_PARAGRAPH_SPACING_LINES, float(self._paragraph_spacing.value()))
         s.set(Keys.EDITOR_AUTO_INDENT, self._auto_indent.isChecked())
+        s.set(Keys.EDITOR_SMART_QUOTES, self._smart_quotes.isChecked())
 
         s.set(Keys.THEME, self._theme.currentData())
 
