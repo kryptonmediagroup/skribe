@@ -75,7 +75,7 @@ from skribe.themes import theme_for
 from skribe.ui.binder_view import BinderView
 from skribe.ui.comments_panel import CommentsPanel
 from skribe.ui.corkboard_view import CorkboardView
-from skribe.ui.editor import EditorWidget, ZOOM_PRESETS
+from skribe.ui.editor import EditorWidget, ZOOM_PRESETS, smartify_html
 from skribe.ui.inspector import InspectorWidget
 from skribe.ui.compile_dialog import CompileDialog
 from skribe.ui.preferences import PreferencesDialog
@@ -435,6 +435,11 @@ class MainWindow(QMainWindow):
         act_stats = QAction("&Statistics…", self)
         act_stats.triggered.connect(self._action_statistics)
         project_menu.addAction(act_stats)
+
+        tools_menu = mb.addMenu("&Tools")
+        act_smart_quotes = QAction("Convert Straight Quotes to Smart…", self)
+        act_smart_quotes.triggered.connect(self._action_convert_smart_quotes)
+        tools_menu.addAction(act_smart_quotes)
 
         help_menu = mb.addMenu("&Help")
         act_about = QAction("&About Skribe", self)
@@ -1242,6 +1247,73 @@ class MainWindow(QMainWindow):
             idx = self._left_tabs.indexOf(self._search_panel)
         self._left_tabs.setCurrentIndex(idx)
         self._search_panel.focus_term()
+
+    def _action_convert_smart_quotes(self) -> None:
+        """Project-wide pass that converts straight quotes to curly ones.
+
+        Idempotent — already-curly quotes are left alone. Comments stay
+        anchored because each substitution is a single BMP code point
+        replacing a single BMP code point, so character offsets are
+        preserved across the document.
+        """
+        if self._project is None or self._project.path is None:
+            QMessageBox.information(
+                self, "Convert Quotes", "Open or create a project first."
+            )
+            return
+        resp = QMessageBox.question(
+            self,
+            "Convert Straight Quotes to Smart",
+            "Replace every straight ' and \" in every document with the "
+            "appropriate curly opener or closer based on context.\n\n"
+            "This sweep is not undoable from the editor — re-running is "
+            "safe (already-curly quotes are left alone), but individual "
+            "wrong choices will need manual fixing.\n\n"
+            "Proceed?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if resp != QMessageBox.Yes:
+            return
+
+        self._flush_current_editor()
+        current_uuid = self._current_item.uuid if self._current_item else None
+
+        total_replaced = 0
+        docs_changed = 0
+        try:
+            for item in self._project.walk():
+                if item.type.is_container:
+                    continue
+                body = read_document_body(self._project.path, item.uuid)
+                if not body:
+                    continue
+                new_body, count = smartify_html(body)
+                if count > 0:
+                    write_document_body(self._project.path, item.uuid, new_body)
+                    item.touch()
+                    docs_changed += 1
+                    total_replaced += count
+            if docs_changed:
+                self._project.touch()
+                save_project(self._project)
+        except Exception as exc:  # noqa: BLE001
+            self._notify_save_failure("Convert Quotes", f"Conversion failed:\n{exc}")
+            return
+
+        # Reload the editor so the user sees the result without having to
+        # switch documents. _flush_current_editor above ensured nothing
+        # unsaved gets clobbered here.
+        if current_uuid is not None and self._current_item is not None:
+            body = read_document_body(self._project.path, current_uuid)
+            self._editor.set_html(body)
+
+        QMessageBox.information(
+            self,
+            "Convert Quotes",
+            f"Replaced {total_replaced:,} straight quote(s) "
+            f"across {docs_changed} document(s).",
+        )
 
     def _action_find_replace(self) -> None:
         """Show the Find/Replace dialog."""

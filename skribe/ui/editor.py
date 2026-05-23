@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+import re
 import uuid as _uuid
 
 from PySide6.QtCore import Qt, Signal
@@ -76,6 +77,65 @@ _SMART_QUOTE_PAIRS = {
     '"': ("“", "”"),
     "'": ("‘", "’"),
 }
+
+# Block-level HTML tags that should reset the "previous character"
+# context when smartify_html walks a document — a quote at the start of
+# a new paragraph should be an opener even if the previous paragraph
+# ended with a letter.
+_SMARTIFY_BLOCK_TAGS = frozenset({
+    "p", "div", "br", "hr", "li", "blockquote", "pre",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "tr", "td", "th", "table", "ul", "ol",
+    "section", "article", "header", "footer", "nav", "aside",
+    "body", "html",
+})
+_SMARTIFY_TAG_RE = re.compile(r"<[^>]*>")
+_SMARTIFY_TAG_NAME_RE = re.compile(r"</?\s*([A-Za-z][A-Za-z0-9]*)")
+
+
+def smartify_html(html: str) -> tuple[str, int]:
+    """Apply contextual smart quotes to text content in an HTML body.
+
+    Tags and attribute values are left untouched. Already-curly quotes
+    are left alone, so this is safe to run repeatedly. Returns the new
+    HTML and the count of straight quote characters that were replaced.
+    """
+    out: list[str] = []
+    count = 0
+    prev = ""  # last effective text character; "" means start-of-content
+    pos = 0
+    n = len(html)
+    while pos < n:
+        ch = html[pos]
+        if ch == "<":
+            m = _SMARTIFY_TAG_RE.match(html, pos)
+            if not m:
+                out.append(ch)
+                prev = ch
+                pos += 1
+                continue
+            tag = m.group(0)
+            out.append(tag)
+            name_match = _SMARTIFY_TAG_NAME_RE.match(tag)
+            if name_match and name_match.group(1).lower() in _SMARTIFY_BLOCK_TAGS:
+                prev = ""
+            pos = m.end()
+            continue
+        if ch == '"':
+            opener, closer = _SMART_QUOTE_PAIRS['"']
+            out.append(opener if (not prev or prev.isspace()) else closer)
+            count += 1
+            prev = "x"
+        elif ch == "'":
+            opener, closer = _SMART_QUOTE_PAIRS["'"]
+            out.append(opener if (not prev or prev.isspace()) else closer)
+            count += 1
+            prev = "x"
+        else:
+            out.append(ch)
+            prev = ch
+        pos += 1
+    return "".join(out), count
 
 
 class _Editor(QTextEdit):
