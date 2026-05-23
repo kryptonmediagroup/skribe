@@ -128,6 +128,13 @@ class PreferencesDialog(QDialog):
         )
         form.addRow(self._smart_quotes)
 
+        self._smart_dashes = QCheckBox("Smart dashes (-- → em, space-hyphen-space → en)", w)
+        self._smart_dashes.setToolTip(
+            "Convert two hyphens to an em dash (—) and a spaced hyphen "
+            "to an en dash (–) as you type."
+        )
+        form.addRow(self._smart_dashes)
+
         self._spell_enabled = QCheckBox("Check spelling while typing", w)
         self._spell_lang = QComboBox(w)
         if spell_is_available():
@@ -172,6 +179,7 @@ class PreferencesDialog(QDialog):
         self._paragraph_spacing.setValue(float(s.get(Keys.EDITOR_PARAGRAPH_SPACING_LINES)))
         self._auto_indent.setChecked(bool(s.get(Keys.EDITOR_AUTO_INDENT)))
         self._smart_quotes.setChecked(bool(s.get(Keys.EDITOR_SMART_QUOTES)))
+        self._smart_dashes.setChecked(bool(s.get(Keys.EDITOR_SMART_DASHES)))
 
         theme_key = str(s.get(Keys.THEME))
         idx = self._theme.findData(theme_key)
@@ -203,6 +211,7 @@ class PreferencesDialog(QDialog):
         s.set(Keys.EDITOR_PARAGRAPH_SPACING_LINES, float(self._paragraph_spacing.value()))
         s.set(Keys.EDITOR_AUTO_INDENT, self._auto_indent.isChecked())
         s.set(Keys.EDITOR_SMART_QUOTES, self._smart_quotes.isChecked())
+        s.set(Keys.EDITOR_SMART_DASHES, self._smart_dashes.isChecked())
 
         s.set(Keys.THEME, self._theme.currentData())
 

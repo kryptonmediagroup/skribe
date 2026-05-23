@@ -159,9 +159,53 @@ class _Editor(QTextEdit):
             return opener
         return closer
 
+    def _try_em_dash(self) -> bool:
+        """Replace a trailing `-` with an em dash so `--` collapses to `—`.
+
+        Returns True if the substitution fired and the caller should swallow
+        the keystroke. Refuses to fire across a selection so block-replace
+        edits don't get corrupted.
+        """
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            return False
+        pos = cursor.position()
+        if pos <= 0:
+            return False
+        if self.document().characterAt(pos - 1) != "-":
+            return False
+        cursor.beginEditBlock()
+        cursor.deletePreviousChar()
+        cursor.insertText("—")  # em dash
+        cursor.endEditBlock()
+        return True
+
+    def _try_en_dash(self) -> bool:
+        """Collapse ` -` + typed space into ` – ` (en dash with trailing space).
+
+        Returns True if the substitution fired. Requires both the preceding
+        hyphen and the space before it, so a hyphen at the very start of a
+        paragraph (or after punctuation like `word-`) doesn't get rewritten.
+        """
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            return False
+        pos = cursor.position()
+        if pos < 2:
+            return False
+        doc = self.document()
+        if doc.characterAt(pos - 1) != "-" or doc.characterAt(pos - 2) != " ":
+            return False
+        cursor.beginEditBlock()
+        cursor.deletePreviousChar()
+        cursor.insertText("– ")  # en dash + the space the user typed
+        cursor.endEditBlock()
+        return True
+
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         text = event.text()
         is_newline = event.key() in (Qt.Key_Return, Qt.Key_Enter)
+        has_ctrl_meta = bool(event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier))
 
         # Smart quotes: substitute curly forms based on context. Ctrl/Meta +
         # the quote key is the escape hatch — inserts the literal straight
@@ -169,7 +213,7 @@ class _Editor(QTextEdit):
         # measurements (6' 2") or quoted code fragments.
         key = event.key()
         is_quote_key = key in (Qt.Key_QuoteDbl, Qt.Key_Apostrophe)
-        if is_quote_key and (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
+        if is_quote_key and has_ctrl_meta:
             literal = '"' if key == Qt.Key_QuoteDbl else "'"
             self.textCursor().insertText(literal)
             event.accept()
@@ -177,12 +221,24 @@ class _Editor(QTextEdit):
         if (
             text in _SMART_QUOTE_PAIRS
             and self._owner.smart_quotes_enabled()
-            and not (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier))
+            and not has_ctrl_meta
         ):
             replacement = self._smart_quote_for(text)
             self.textCursor().insertText(replacement)
             event.accept()
             return
+
+        # Smart dashes: `--` collapses to an em dash; ` - ` (space-hyphen-
+        # space) collapses to ` – ` (en dash). Both fire only on the keystroke
+        # that completes the pattern, so a lone hyphen or a hyphen at end-of-
+        # line stays a hyphen until the user actually finishes the sequence.
+        if self._owner.smart_dashes_enabled() and not has_ctrl_meta:
+            if text == "-" and self._try_em_dash():
+                event.accept()
+                return
+            if text == " " and self._try_en_dash():
+                event.accept()
+                return
 
         # Return on an empty, indented paragraph: Qt's default handler wipes
         # the block's first-line indent instead of inserting a new block. That
@@ -824,6 +880,9 @@ class EditorWidget(QWidget):
 
     def smart_quotes_enabled(self) -> bool:
         return bool(self._settings.get(Keys.EDITOR_SMART_QUOTES))
+
+    def smart_dashes_enabled(self) -> bool:
+        return bool(self._settings.get(Keys.EDITOR_SMART_DASHES))
 
     def current_indent_px(self) -> float:
         em = float(self._settings.get(Keys.EDITOR_FIRST_LINE_INDENT_EM))
