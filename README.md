@@ -21,6 +21,7 @@ Skribe is deliberately a small subset of Scrivener — the features one writer a
 - Per-document cursor position is saved on every project switch.
 - The edit pane is zoomable, with apparent font size chageable on the fly for the best writing and editing experience.
 - Supports text to speech - hear your wondrous prose spoken aloud.  Great for finding problems with phrasing, missing words or repetition.
+- **Typographic substitutions** as you type: straight quotes become contextual curly quotes, `--` becomes an em dash (—), and a hyphen flanked by spaces becomes an en dash (–). Each is independently toggleable on the Editor tab of Preferences. Hold **Ctrl** while pressing `'` or `"` to insert a literal straight quote; for an unconverted dash, hit **Ctrl+Z** right after the substitution to roll it back without losing the keystrokes. A one-shot **Tools → Convert Straight Quotes to Smart…** sweeps existing project content (HTML-aware; idempotent).
 
 ### Spell-check
 - Inline spell-check via pyenchant + hunspell (red-underline highlighter).
