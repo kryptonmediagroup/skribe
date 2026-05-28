@@ -17,13 +17,8 @@ if not exist "%VENV%" (
     echo Virtual environment ready.
 )
 
-REM Ensure piper voice model is available
-set "VOICE_DIR=%USERPROFILE%\.local\share\piper\voices"
-set "VOICE_FILE=%VOICE_DIR%\en_US-lessac-medium.onnx"
-if not exist "%VOICE_FILE%" (
-    if not exist "%VOICE_DIR%" mkdir "%VOICE_DIR%"
-    call "%VENV%\Scripts\python.exe" -m piper.download_voices --download-dir "%VOICE_DIR%" en_US-lessac-medium
-)
+REM KittenTTS downloads its voice model from Hugging Face on first use, so no
+REM voice bootstrap step is needed here.
 
 REM Launch Skribe
 call "%VENV%\Scripts\python.exe" -m skribe %*

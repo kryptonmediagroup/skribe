@@ -7,6 +7,9 @@ position is recorded in the per-project ``ui_state.json``.
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -214,6 +217,8 @@ class MainWindow(QMainWindow):
         self._tts_stop_button.setVisible(False)
         self._tts_stop_button.clicked.connect(self._stop_tts)
         self._tts_worker: Optional[_TTSWorker] = None
+        self._tts_failed_msg: Optional[str] = None
+        self._prewarm_tts()
 
         self._build_menus()
         self._wire_signals()
@@ -1008,14 +1013,39 @@ class MainWindow(QMainWindow):
             html = self._editor.document_html()
         self._print_from_html(html)
 
+    def _prewarm_tts(self) -> None:
+        """Load the KittenTTS model in the background so the first read is fast.
+
+        Runs in a plain daemon thread (not a QThread) — it touches no Qt
+        objects, just warms skribe.tts's cached model. If TTS isn't installed
+        this is a no-op. A read that arrives before warming finishes simply
+        waits on the same cached load.
+        """
+        import threading
+
+        from skribe import tts
+
+        if not tts.is_available():
+            return
+        threading.Thread(
+            target=tts.load_model, name="skribe-tts-prewarm", daemon=True
+        ).start()
+
     def _start_tts(self, text: str) -> None:
         """Start text-to-speech playback for the given text."""
         # Stop any existing playback
         self._stop_tts()
 
-        self._tts_worker = _TTSWorker(text)
+        voice = str(self._settings.get(Keys.TTS_VOICE))
+        speed = float(self._settings.get(Keys.TTS_SPEED))
+        # Synthesis (and a one-time model load on the first read) happens in
+        # the worker; give immediate feedback until audio actually starts.
+        self._tts_failed_msg = None
+        self.statusBar().showMessage("Preparing speech…", 0)
+        self._tts_worker = _TTSWorker(text, voice, speed)
         self._tts_worker.started_speaking.connect(self._on_tts_started)
         self._tts_worker.finished_speaking.connect(self._on_tts_finished)
+        self._tts_worker.failed.connect(self._on_tts_failed)
         self._tts_worker.start()
 
     def _stop_tts(self) -> None:
@@ -1032,9 +1062,18 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Reading selection...", 0)
 
     def _on_tts_finished(self) -> None:
-        """Called when TTS playback finishes."""
+        """Called when TTS playback finishes (success or failure)."""
         self._hide_tts_stop_button()
-        self.statusBar().showMessage("Finished.", 2000)
+        # ``failed`` is emitted before ``finished_speaking``, so the message
+        # is set by the time we get here — show it instead of "Finished."
+        if self._tts_failed_msg:
+            self.statusBar().showMessage(f"Speech: {self._tts_failed_msg}", 8000)
+        else:
+            self.statusBar().showMessage("Finished.", 2000)
+
+    def _on_tts_failed(self, message: str) -> None:
+        """Record a TTS failure; the message is surfaced in _on_tts_finished."""
+        self._tts_failed_msg = message
 
     def _show_tts_stop_button(self) -> None:
         """Show the stop button in the status bar."""
@@ -1784,6 +1823,11 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, event) -> None:
+        # Stop any in-flight text-to-speech first. If the worker QThread is
+        # still running when the window (and its only reference) is torn
+        # down, Qt aborts the process with "QThread: Destroyed while thread
+        # is still running". _stop_tts requests a stop and waits for it.
+        self._stop_tts()
         self._flush_current_editor()
         if self._project is not None:
             try:
@@ -1809,82 +1853,175 @@ class MainWindow(QMainWindow):
         s.setValue(Keys.MAIN_STATE, self.saveState())
 
 
+def _audio_player_cmd(wav_path: str) -> Optional[list[str]]:
+    """Return a CLI command to play ``wav_path``, or None if none is found.
+
+    Prefer players that go through the desktop sound server (PipeWire, then
+    PulseAudio) so we share the output device with other apps. Plain
+    ``aplay`` opens the raw ALSA device and fails with "device busy" when a
+    sound server is already holding it — so it's the last resort, used only
+    on systems with no sound server. ``afplay`` covers macOS; Windows has no
+    bundled CLI wav player, so we drive .NET's SoundPlayer via PowerShell.
+    """
+    import shutil
+
+    if sys.platform == "win32":
+        return [
+            "powershell", "-NoProfile", "-Command",
+            f"(New-Object System.Media.SoundPlayer '{wav_path}').PlaySync()",
+        ]
+    if shutil.which("pw-play"):
+        return ["pw-play", wav_path]
+    if shutil.which("paplay"):
+        return ["paplay", wav_path]
+    if shutil.which("afplay"):
+        return ["afplay", wav_path]
+    if shutil.which("aplay"):
+        return ["aplay", "-q", wav_path]
+    return None
+
+
 class _TTSWorker(QThread):
     """Text-to-speech worker that runs in a background thread.
 
-    Uses pyttsx3 for offline, cross-platform TTS. The engine is created
-    in the worker thread to avoid cross-thread signal/slot issues.
+    Synthesizes the given text with KittenTTS (see skribe.tts) to a temp
+    WAV, then plays it through an available CLI player (see
+    _audio_player_cmd). The model is loaded and cached in skribe.tts, so
+    only the first read pays the load/download cost. Synthesis runs off the
+    GUI thread; ``started_speaking`` fires once audio actually begins so the
+    Stop button reflects playback.
     """
 
     started_speaking = Signal()
     finished_speaking = Signal()
+    failed = Signal(str)
 
-    def __init__(self, text: str):
+    def __init__(self, text: str, voice: str, speed: float):
         super().__init__()
         self._text = text
-        self._engine = None
+        self._voice = voice
+        self._speed = speed
         self._stop_requested = False
+        self._reported_failure = False
+        self._player_proc = None
 
     def run(self) -> None:
-        import os
-        import wave
-        import subprocess
+        import queue
+        import shutil
+        import tempfile
+        import threading
 
-        try:
-            from piper import PiperVoice
+        import soundfile as sf
 
-            voice_path = os.path.expanduser("~/.local/share/piper/voices/en_US-lessac-medium.onnx")
-            if not os.path.exists(voice_path):
-                print("Piper voice not found", file=sys.stderr)
-                self.finished_speaking.emit()
-                return
+        from skribe import tts
 
-            self._voice = PiperVoice.load(voice_path)
-
-            temp_path = os.path.expanduser("~/.cache/skribe/tts.wav")
-            os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-
-            with wave.open(temp_path, 'wb') as wav_file:
-                self._voice.synthesize_wav(self._text, wav_file)
-
-            if self._stop_requested:
-                os.unlink(temp_path)
-                self.finished_speaking.emit()
-                return
-
-            self.started_speaking.emit()
-
-            self._aplay_proc = subprocess.Popen(['aplay', '-q', temp_path])
-            self._aplay_proc.wait()
-
-            os.unlink(temp_path)
-        except ImportError:
-            import sys
-            print("Piper TTS not installed", file=sys.stderr)
-        except Exception as e:
-            import sys
-            print(f"TTS error: {e}", file=sys.stderr)
-        finally:
+        if not tts.is_available():
+            self._fail(
+                "KittenTTS isn't installed — reinstall dependencies "
+                "(pip install -r requirements.txt)."
+            )
             self.finished_speaking.emit()
-            self._aplay_proc = None
+            return
+
+        chunks = tts.chunk_text(self._text)
+        if not chunks:
+            self.finished_speaking.emit()
+            return
+
+        # Producer/consumer pipeline: a synth thread renders each chunk to a
+        # WAV and hands it off through a small bounded queue; this thread
+        # plays the WAVs back to back. Synthesis (~seconds/chunk) outruns
+        # speech playback (~tens of seconds/chunk), so after the first chunk
+        # the renderer stays ahead and playback is continuous — but audio
+        # starts as soon as chunk one is ready instead of after the whole
+        # selection renders.
+        tmpdir = tempfile.mkdtemp(prefix="skribe-tts-")
+        pending: "queue.Queue" = queue.Queue(maxsize=2)
+        synth_errors: list[str] = []
+
+        def produce() -> None:
+            try:
+                for i, chunk in enumerate(chunks):
+                    if self._stop_requested:
+                        break
+                    audio = tts.synthesize_chunk(chunk, self._voice, self._speed)
+                    if self._stop_requested:
+                        break
+                    if audio is None or not len(audio):
+                        continue
+                    if i == len(chunks) - 1:
+                        audio = tts.pad_tail(audio)  # breathing room at the end
+                    path = os.path.join(tmpdir, f"chunk_{i:04d}.wav")
+                    sf.write(path, audio, tts.SAMPLE_RATE, subtype="PCM_16")
+                    # Park on the bounded queue, but keep checking for stop so
+                    # we don't render the whole document ahead of playback.
+                    while not self._stop_requested:
+                        try:
+                            pending.put(path, timeout=0.2)
+                            break
+                        except queue.Full:
+                            continue
+            except Exception as exc:  # noqa: BLE001
+                synth_errors.append(str(exc))
+            finally:
+                pending.put(None)  # sentinel: no more chunks
+
+        producer = threading.Thread(target=produce, name="skribe-tts-synth", daemon=True)
+        producer.start()
+
+        started = False
+        try:
+            while not self._stop_requested:
+                item = pending.get()
+                if item is None:
+                    break
+                cmd = _audio_player_cmd(item)
+                if cmd is None:
+                    self._fail("No audio player found — install pw-play, paplay, or aplay.")
+                    break
+                if not started:
+                    self.started_speaking.emit()
+                    started = True
+                self._player_proc = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+                _, err = self._player_proc.communicate()
+                rc = self._player_proc.returncode
+                if rc not in (0, None) and not self._stop_requested:
+                    detail = (err or b"").decode("utf-8", "replace").strip()
+                    self._fail(f"Audio playback failed (exit {rc}). {detail}".strip())
+                    break
+        except Exception as exc:  # noqa: BLE001
+            self._fail(f"Text-to-speech error: {exc}")
+        finally:
+            user_stopped = self._stop_requested
+            # Signal the producer to stop and unblock it if it's parked on a
+            # full queue, then reclaim the thread and temp files.
+            self._stop_requested = True
+            try:
+                while True:
+                    pending.get_nowait()
+            except queue.Empty:
+                pass
+            producer.join(timeout=5)
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            for exc in synth_errors:
+                print(f"TTS synth error: {exc}", file=sys.stderr)
+            if not started and not user_stopped and not self._reported_failure:
+                self._fail("Couldn't generate speech for this text (see console for details).")
+            self.finished_speaking.emit()
+            self._player_proc = None
+
+    def _fail(self, message: str) -> None:
+        self._reported_failure = True
+        print(message, file=sys.stderr)
+        self.failed.emit(message)
 
     def stop(self) -> None:
         """Request immediate stop of TTS playback."""
         self._stop_requested = True
-        if hasattr(self, '_aplay_proc') and self._aplay_proc and self._aplay_proc.poll() is None:
-            self._aplay_proc.terminate()
+        proc = self._player_proc
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
             try:
-                self._aplay_proc.wait(timeout=1)
+                proc.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                self._aplay_proc.kill()
-
-    def _on_started(self) -> None:
-        self.started_speaking.emit()
-
-    def _on_finished(self) -> None:
-        self.finished_speaking.emit()
-
-    def _on_error(self, e: Exception) -> None:
-        # Silently ignore TTS errors - the feature simply won't work
-        # if the engine isn't available on this system
-        pass
+                proc.kill()

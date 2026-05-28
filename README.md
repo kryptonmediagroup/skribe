@@ -20,7 +20,7 @@ Skribe is deliberately a small subset of Scrivener — the features one writer a
 - Auto-indent: every new paragraph inherits the configured indent.
 - Per-document cursor position is saved on every project switch.
 - The edit pane is zoomable, with apparent font size chageable on the fly for the best writing and editing experience.
-- Supports text to speech - hear your wondrous prose spoken aloud.  Great for finding problems with phrasing, missing words or repetition.
+- Supports text to speech - hear your wondrous prose spoken aloud.  Great for finding problems with phrasing, missing words or repetition. Powered by **KittenTTS**, a tiny CPU-only neural voice (no GPU, runs on the Pi); pick from eight voices and set the speaking rate on the **Speech** tab of Preferences. Trigger it with *Read Selection* (Ctrl+Shift+R) or the right-click menu.
 - **Typographic substitutions** as you type: straight quotes become contextual curly quotes, `--` becomes an em dash (—), and a hyphen flanked by spaces becomes an en dash (–). Each is independently toggleable on the Editor tab of Preferences. Hold **Ctrl** while pressing `'` or `"` to insert a literal straight quote; for an unconverted dash, hit **Ctrl+Z** right after the substitution to roll it back without losing the keystrokes. A one-shot **Tools → Convert Straight Quotes to Smart…** sweeps existing project content (HTML-aware; idempotent).
 
 ### Spell-check
@@ -73,6 +73,7 @@ Word count, character count (with and without spaces), paragraphs, sentences, do
 - **pandoc** on the system `PATH` for DOCX/ODT/RTF/EPUB conversion (Print, PDF, HTML, and TXT compile work without it).
 - **LibreOffice** (`soffice`) for legacy `.doc` import/export.
 - **hunspell** dictionaries for spell-check (e.g., `hunspell-en-us`).
+- **KittenTTS** (installed via `requirements.txt`) for text-to-speech; the voice model downloads from Hugging Face on first use. Playback uses `aplay` (ALSA) on Linux.
 
 ## Installation
 

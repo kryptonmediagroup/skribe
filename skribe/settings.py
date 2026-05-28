@@ -48,6 +48,10 @@ class Keys:
     SPELLCHECK_ENABLED = "spellcheck/enabled"
     SPELLCHECK_LANGUAGE = "spellcheck/language"
 
+    # Text-to-speech (KittenTTS). Voice ids live in skribe.tts.VOICES.
+    TTS_VOICE = "tts/voice"
+    TTS_SPEED = "tts/speed"
+
     # View
     VIEW_MODE = "view/center_pane_mode"  # "editor" | "corkboard"
     VIEW_ZOOM_PERCENT = "view/zoom_percent"  # editor display zoom, integer percent
@@ -80,6 +84,10 @@ DEFAULTS: dict[str, Any] = {
 
     Keys.SPELLCHECK_ENABLED: True,
     Keys.SPELLCHECK_LANGUAGE: "en_US",
+
+    # Must match skribe.tts.DEFAULT_VOICE.
+    Keys.TTS_VOICE: "expr-voice-2-f",
+    Keys.TTS_SPEED: 1.0,
 
     Keys.VIEW_MODE: "editor",
     Keys.VIEW_ZOOM_PERCENT: 100,

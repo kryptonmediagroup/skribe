@@ -13,12 +13,7 @@ if [ ! -d "$VENV" ]; then
     echo "Virtual environment ready."
 fi
 
-# Ensure piper voice model is available
-VOICE_DIR="$HOME/.local/share/piper/voices"
-VOICE_FILE="$VOICE_DIR/en_US-lessac-medium.onnx"
-if [ ! -f "$VOICE_FILE" ]; then
-    mkdir -p "$VOICE_DIR"
-    "$VENV/bin/python3" -m piper.download_voices --download-dir "$VOICE_DIR" en_US-lessac-medium
-fi
+# KittenTTS downloads its voice model from Hugging Face on first use, so no
+# voice bootstrap step is needed here.
 
 exec "$VENV/bin/python3" -m skribe "$@"

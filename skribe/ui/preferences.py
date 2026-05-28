@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from skribe import tts
 from skribe.settings import Keys, app_settings, derive_initials
 from skribe.spellcheck import available_languages, is_available as spell_is_available
 from skribe.themes import THEMES
@@ -39,6 +40,7 @@ class PreferencesDialog(QDialog):
         tabs = QTabWidget(self)
         tabs.addTab(self._build_general_tab(), "General")
         tabs.addTab(self._build_editor_tab(), "Editor")
+        tabs.addTab(self._build_speech_tab(), "Speech")
         tabs.addTab(self._build_appearance_tab(), "Appearance")
 
         buttons = QDialogButtonBox(
@@ -148,6 +150,28 @@ class PreferencesDialog(QDialog):
         form.addRow("Spelling language:", self._spell_lang)
         return w
 
+    def _build_speech_tab(self) -> QWidget:
+        w = QWidget(self)
+        form = QFormLayout(w)
+
+        self._tts_voice = QComboBox(w)
+        for voice_id, label in tts.VOICES:
+            self._tts_voice.addItem(label, userData=voice_id)
+        self._tts_voice.setToolTip(
+            "Voice used when reading text aloud (Read Selection / Ctrl+Shift+R)."
+        )
+        form.addRow("Voice:", self._tts_voice)
+
+        self._tts_speed = QDoubleSpinBox(w)
+        self._tts_speed.setRange(0.5, 2.0)
+        self._tts_speed.setSingleStep(0.1)
+        self._tts_speed.setDecimals(1)
+        self._tts_speed.setSuffix("×")
+        self._tts_speed.setToolTip("Speaking rate. 1.0 is the voice's normal speed.")
+        form.addRow("Speed:", self._tts_speed)
+
+        return w
+
     def _build_appearance_tab(self) -> QWidget:
         w = QWidget(self)
         form = QFormLayout(w)
@@ -193,6 +217,13 @@ class PreferencesDialog(QDialog):
                 idx = self._spell_lang.findData("en_US")
             self._spell_lang.setCurrentIndex(max(idx, 0))
 
+        cur_voice = str(s.get(Keys.TTS_VOICE)) or tts.DEFAULT_VOICE
+        vidx = self._tts_voice.findData(cur_voice)
+        if vidx < 0:
+            vidx = self._tts_voice.findData(tts.DEFAULT_VOICE)
+        self._tts_voice.setCurrentIndex(max(vidx, 0))
+        self._tts_speed.setValue(float(s.get(Keys.TTS_SPEED)))
+
     def _apply(self) -> None:
         s = self._settings
         name = self._author_name.text().strip()
@@ -218,6 +249,10 @@ class PreferencesDialog(QDialog):
         s.set(Keys.SPELLCHECK_ENABLED, self._spell_enabled.isChecked())
         if spell_is_available() and self._spell_lang.currentData():
             s.set(Keys.SPELLCHECK_LANGUAGE, self._spell_lang.currentData())
+
+        if self._tts_voice.currentData():
+            s.set(Keys.TTS_VOICE, self._tts_voice.currentData())
+        s.set(Keys.TTS_SPEED, float(self._tts_speed.value()))
 
         s.sync()
         self.applied.emit()
