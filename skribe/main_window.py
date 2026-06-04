@@ -8,6 +8,7 @@ position is recorded in the per-project ``ui_state.json``.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -295,6 +296,11 @@ class MainWindow(QMainWindow):
         act_save.setShortcut(QKeySequence.Save)
         act_save.triggered.connect(self._action_save)
         file_menu.addAction(act_save)
+
+        act_save_as = QAction("Save &As…", self)
+        act_save_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        act_save_as.triggered.connect(self._action_save_as)
+        file_menu.addAction(act_save_as)
 
         act_close = QAction("&Close Project", self)
         act_close.triggered.connect(self._action_close)
@@ -664,6 +670,43 @@ class MainWindow(QMainWindow):
             self._notify_save_failure("Save", f"Failed to save project:\n{exc}")
             return
         self._notify_save_success("Save", "Project saved.")
+        self.statusBar().showMessage("Saved", 2000)
+
+    def _action_save_as(self) -> None:
+        if self._project is None:
+            return
+        self._flush_current_editor()
+        dlg = QFileDialog(self, "Save Project As…")
+        dlg.setAcceptMode(QFileDialog.AcceptSave)
+        dlg.setFileMode(QFileDialog.AnyFile)
+        dlg.setNameFilter("Skribe projects (*.skribe)")
+        dlg.setDefaultSuffix("skribe")
+        if self._project.path is not None:
+            dlg.selectFile(self._project.path.name)
+        if dlg.exec() != QFileDialog.Accepted:
+            return
+        new_path = Path(dlg.selectedFiles()[0])
+        if new_path.suffix != ".skribe":
+            new_path = new_path.with_suffix(".skribe")
+        if new_path == self._project.path:
+            save_project(self._project)
+            self._persist_ui_state()
+            self.statusBar().showMessage("Saved", 2000)
+            return
+        if new_path.exists():
+            reply = QMessageBox.question(
+                self, "Save As", f"{new_path.name} already exists. Overwrite?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+            shutil.rmtree(new_path)
+        if self._project.path is not None and self._project.path.exists():
+            shutil.copytree(self._project.path, new_path)
+        save_project(self._project, new_path)
+        self._persist_ui_state()
+        self._register_recent(new_path)
+        self._update_ui_for_project()
         self.statusBar().showMessage("Saved", 2000)
 
     def _action_close(self) -> None:
