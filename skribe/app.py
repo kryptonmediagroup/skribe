@@ -1,6 +1,7 @@
 """Application entry point."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +24,12 @@ def main(argv: list[str] | None = None) -> int:
         # Setting the icon on QApplication propagates to every top-level
         # window — covers the title bar, dock/taskbar, and Alt-Tab.
         app.setWindowIcon(QIcon(str(ICON_PATH)))
+
+    # Apply the Hugging Face token before any HF library code runs so
+    # KittenTTS can download its model files without rate-limit warnings.
+    hf_token = str(app_settings().get(Keys.HF_TOKEN) or "")
+    if hf_token:
+        os.environ["HF_TOKEN"] = hf_token
 
     # Offer the first-run setup before we build the main window so any
     # chosen defaults (theme, font, indent…) are already in place when

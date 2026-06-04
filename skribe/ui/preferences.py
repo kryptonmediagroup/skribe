@@ -1,6 +1,7 @@
 """Preferences dialog with General / Editor / Appearance tabs."""
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from PySide6.QtCore import Signal
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFontComboBox,
     QFormLayout,
+    QLabel,
     QLineEdit,
     QSpinBox,
     QTabWidget,
@@ -170,6 +172,24 @@ class PreferencesDialog(QDialog):
         self._tts_speed.setToolTip("Speaking rate. 1.0 is the voice's normal speed.")
         form.addRow("Speed:", self._tts_speed)
 
+        self._hf_token = QLineEdit(w)
+        self._hf_token.setEchoMode(QLineEdit.Password)
+        self._hf_token.setPlaceholderText("hf_…")
+        self._hf_token.setToolTip(
+            "Hugging Face access token. Enables authenticated model downloads "
+            "and removes rate-limit warnings. Get one free at huggingface.co/settings/tokens."
+        )
+        form.addRow("Hugging Face token:", self._hf_token)
+
+        hint = QLabel(
+            "Used by the speech engine to download voice models. "
+            "Leave blank to use unauthenticated (rate-limited) access.",
+            w,
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray;")
+        form.addRow(hint)
+
         return w
 
     def _build_appearance_tab(self) -> QWidget:
@@ -223,6 +243,7 @@ class PreferencesDialog(QDialog):
             vidx = self._tts_voice.findData(tts.DEFAULT_VOICE)
         self._tts_voice.setCurrentIndex(max(vidx, 0))
         self._tts_speed.setValue(float(s.get(Keys.TTS_SPEED)))
+        self._hf_token.setText(str(s.get(Keys.HF_TOKEN) or ""))
 
     def _apply(self) -> None:
         s = self._settings
@@ -253,6 +274,13 @@ class PreferencesDialog(QDialog):
         if self._tts_voice.currentData():
             s.set(Keys.TTS_VOICE, self._tts_voice.currentData())
         s.set(Keys.TTS_SPEED, float(self._tts_speed.value()))
+
+        token = self._hf_token.text().strip()
+        s.set(Keys.HF_TOKEN, token)
+        if token:
+            os.environ["HF_TOKEN"] = token
+        elif "HF_TOKEN" in os.environ:
+            del os.environ["HF_TOKEN"]
 
         s.sync()
         self.applied.emit()

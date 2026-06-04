@@ -51,6 +51,7 @@ class Keys:
     # Text-to-speech (KittenTTS). Voice ids live in skribe.tts.VOICES.
     TTS_VOICE = "tts/voice"
     TTS_SPEED = "tts/speed"
+    HF_TOKEN = "tts/hf_token"
 
     # View
     VIEW_MODE = "view/center_pane_mode"  # "editor" | "corkboard"
@@ -88,6 +89,7 @@ DEFAULTS: dict[str, Any] = {
     # Must match skribe.tts.DEFAULT_VOICE.
     Keys.TTS_VOICE: "expr-voice-2-f",
     Keys.TTS_SPEED: 1.0,
+    Keys.HF_TOKEN: "",
 
     Keys.VIEW_MODE: "editor",
     Keys.VIEW_ZOOM_PERCENT: 100,

@@ -11,6 +11,7 @@ nag on subsequent launches.
 """
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from PySide6.QtCore import Qt
@@ -60,6 +61,7 @@ class FirstRunDialog(QDialog):
         layout.addWidget(self._build_editor_group())
         layout.addWidget(self._build_appearance_group())
         layout.addWidget(self._build_general_group())
+        layout.addWidget(self._build_services_group())
 
         buttons = QDialogButtonBox(self)
         skip_btn = QPushButton("Use Defaults", self)
@@ -164,6 +166,26 @@ class FirstRunDialog(QDialog):
         form.addRow("Max recent projects:", self._max_recent)
         return g
 
+    def _build_services_group(self) -> QGroupBox:
+        g = QGroupBox("Services", self)
+        form = QFormLayout(g)
+
+        self._hf_token = QLineEdit(g)
+        self._hf_token.setEchoMode(QLineEdit.Password)
+        self._hf_token.setPlaceholderText("hf_…  (optional)")
+        form.addRow("Hugging Face token:", self._hf_token)
+
+        hint = QLabel(
+            "Optional. Enables authenticated model downloads for the speech engine "
+            "and removes rate-limit warnings. Get a free token at "
+            "huggingface.co/settings/tokens.",
+            g,
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray;")
+        form.addRow(hint)
+        return g
+
     # --- name/initials linkage ---
 
     def _mark_initials_touched(self) -> None:
@@ -198,6 +220,7 @@ class FirstRunDialog(QDialog):
 
         self._reopen_last.setChecked(bool(s.get(Keys.REOPEN_LAST)))
         self._max_recent.setValue(int(s.get(Keys.MAX_RECENT)))
+        self._hf_token.setText(str(s.get(Keys.HF_TOKEN) or ""))
 
         self._spell_enabled.setChecked(bool(s.get(Keys.SPELLCHECK_ENABLED)))
         if spell_is_available():
@@ -230,6 +253,14 @@ class FirstRunDialog(QDialog):
         s.set(Keys.SPELLCHECK_ENABLED, self._spell_enabled.isChecked())
         if spell_is_available() and self._spell_lang.currentData():
             s.set(Keys.SPELLCHECK_LANGUAGE, self._spell_lang.currentData())
+
+        token = self._hf_token.text().strip()
+        s.set(Keys.HF_TOKEN, token)
+        if token:
+            os.environ["HF_TOKEN"] = token
+        elif "HF_TOKEN" in os.environ:
+            del os.environ["HF_TOKEN"]
+
         self.accept()
 
     # Any exit path (Accept, Skip, close-box) flips the completion flag so
