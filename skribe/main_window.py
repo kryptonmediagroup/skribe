@@ -691,7 +691,7 @@ class MainWindow(QMainWindow):
         if new_path == self._project.path:
             save_project(self._project)
             self._persist_ui_state()
-            self.statusBar().showMessage("Saved", 2000)
+            self._notify_save_success("Save", "Project saved.")
             return
         if new_path.exists():
             reply = QMessageBox.question(
@@ -701,13 +701,18 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
             shutil.rmtree(new_path)
-        if self._project.path is not None and self._project.path.exists():
-            shutil.copytree(self._project.path, new_path)
-        save_project(self._project, new_path)
-        self._persist_ui_state()
+        try:
+            if self._project.path is not None and self._project.path.exists():
+                shutil.copytree(self._project.path, new_path)
+            self._project.name = new_path.stem
+            save_project(self._project, new_path)
+            self._persist_ui_state()
+        except Exception as exc:  # noqa: BLE001
+            self._notify_save_failure("Save As", f"Failed to save project:\n{exc}")
+            return
         self._register_recent(new_path)
-        self._update_ui_for_project()
-        self.statusBar().showMessage("Saved", 2000)
+        self.setWindowTitle(f"Skribe — {self._project.name}")
+        self._notify_save_success("Save As", f"Saved as {new_path.name}")
 
     def _action_close(self) -> None:
         if not self._confirm_discard():
