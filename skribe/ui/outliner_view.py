@@ -323,11 +323,15 @@ class OutlinerProxyModel(QIdentityProxyModel):
         if col is OutlinerColumn.CREATED:
             if role == Qt.DisplayRole:
                 return _format_datetime(item.created)
+            if role == Qt.EditRole:
+                return item.created
             return None
 
         if col is OutlinerColumn.MODIFIED:
             if role == Qt.DisplayRole:
                 return _format_datetime(item.modified)
+            if role == Qt.EditRole:
+                return item.modified
             return None
 
         if col is OutlinerColumn.INCLUDE_IN_COMPILE:
@@ -418,6 +422,20 @@ class OutlinerProxyModel(QIdentityProxyModel):
             self.dataChanged.emit(prog_idx, prog_idx, [Qt.DisplayRole])
             return True
 
+        if col is OutlinerColumn.CREATED and role == Qt.EditRole:
+            item.created = str(value)
+            if self._project is not None:
+                self._project.touch()
+            self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.EditRole])
+            return True
+
+        if col is OutlinerColumn.MODIFIED and role == Qt.EditRole:
+            item.modified = str(value)
+            if self._project is not None:
+                self._project.touch()
+            self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.EditRole])
+            return True
+
         if col is OutlinerColumn.INCLUDE_IN_COMPILE and role == Qt.CheckStateRole:
             if isinstance(value, int):
                 checked = value == Qt.Checked.value
@@ -491,6 +509,8 @@ class OutlinerProxyModel(QIdentityProxyModel):
             OutlinerColumn.LABEL,
             OutlinerColumn.STATUS,
             OutlinerColumn.TARGET,
+            OutlinerColumn.CREATED,
+            OutlinerColumn.MODIFIED,
         ):
             if not item.type.is_root_container:
                 base |= Qt.ItemIsEditable
@@ -761,6 +781,33 @@ class DateDelegate(QStyledItemDelegate):
     def setModelData(self, editor, model, index: QModelIndex) -> None:
         model.setData(index, editor.date().toString("yyyy-MM-dd"), Qt.EditRole)
 
+
+class DateTimeDelegate(QStyledItemDelegate):
+    """Inline datetime editor using a QDateTimeEdit widget."""
+
+    def createEditor(self, parent: QWidget, option, index) -> QWidget:
+        from PySide6.QtWidgets import QDateTimeEdit
+        from PySide6.QtCore import QDateTime
+        editor = QDateTimeEdit(parent)
+        editor.setCalendarPopup(True)
+        editor.setDisplayFormat("yyyy-MM-dd HH:mm")
+        return editor
+
+    def setEditorData(self, editor, index: QModelIndex) -> None:
+        from PySide6.QtCore import QDateTime
+        value = index.data(Qt.EditRole) or ""
+        try:
+            dt = QDateTime.fromString(value, Qt.ISODate)
+            if dt.isValid():
+                editor.setDateTime(dt)
+            else:
+                editor.setDateTime(QDateTime.currentDateTimeUtc())
+        except Exception:
+            editor.setDateTime(QDateTime.currentDateTimeUtc())
+
+    def setModelData(self, editor, model, index: QModelIndex) -> None:
+        model.setData(index, editor.dateTime().toUTC().toString(Qt.ISODate), Qt.EditRole)
+
 # ---------------------------------------------------------------------------
 # Outliner view
 # ---------------------------------------------------------------------------
@@ -796,7 +843,9 @@ class OutlinerView(QTreeView):
         self.setDefaultDropAction(Qt.MoveAction)
 
         # -- edit triggers --
-        self.setEditTriggers(QTreeView.EditKeyPressed | QTreeView.SelectedClicked)
+        self.setEditTriggers(
+            QTreeView.DoubleClicked | QTreeView.EditKeyPressed | QTreeView.SelectedClicked
+        )
 
         # -- context menu --
         self.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -839,6 +888,9 @@ class OutlinerView(QTreeView):
         self.setItemDelegateForColumn(int(OutlinerColumn.LABEL), self._label_delegate)
         self._status_delegate = ComboDelegate([], parent=self)
         self.setItemDelegateForColumn(int(OutlinerColumn.STATUS), self._status_delegate)
+        # Created / Modified datetime editors.
+        self.setItemDelegateForColumn(int(OutlinerColumn.CREATED), DateTimeDelegate(self))
+        self.setItemDelegateForColumn(int(OutlinerColumn.MODIFIED), DateTimeDelegate(self))
 
     # -- project ---------------------------------------------------------
 
