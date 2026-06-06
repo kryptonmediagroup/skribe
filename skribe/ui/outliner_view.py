@@ -770,6 +770,7 @@ class OutlinerView(QTreeView):
 
     item_activated = Signal(QModelIndex)
     context_menu_requested = Signal(QModelIndex, object)  # (proxy_index, QPoint)
+    custom_fields_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -928,6 +929,10 @@ class OutlinerView(QTreeView):
                     action.setChecked(not self.isColumnHidden(col_idx))
                     action.toggled.connect(lambda checked, c=col_idx: self.setColumnHidden(c, not checked))
                     menu.addAction(action)
+        menu.addSeparator()
+        act_edit_fields = QAction("Custom Metadata Fields…", menu)
+        act_edit_fields.triggered.connect(self.custom_fields_requested.emit)
+        menu.addAction(act_edit_fields)
         menu.exec(self.header().mapToGlobal(pos))
 
     # -- signals / activation -------------------------------------------

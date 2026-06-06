@@ -275,6 +275,7 @@ class MainWindow(QMainWindow):
         self._corkboard.context_menu_requested.connect(self._on_corkboard_context_menu)
         self._outliner.item_activated.connect(self._on_outliner_activated)
         self._outliner.context_menu_requested.connect(self._on_outliner_context_menu)
+        self._outliner.custom_fields_requested.connect(self._action_custom_fields)
 
         # TTS: editor's read-selection request (from context menu)
         self._editor.read_selection_requested.connect(self._action_read_selection)
@@ -400,14 +401,15 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(act_read_selection)
 
         edit_menu.addSeparator()
+        act_custom_fields = QAction("Custom &Metadata Fields…", self)
+        act_custom_fields.triggered.connect(self._action_custom_fields)
+        edit_menu.addAction(act_custom_fields)
+
+        edit_menu.addSeparator()
         act_prefs = QAction("&Preferences…", self)
         act_prefs.setShortcut(QKeySequence("Ctrl+,"))
         act_prefs.triggered.connect(self._action_preferences)
         edit_menu.addAction(act_prefs)
-
-        act_custom_fields = QAction("Custom &Metadata Fields...", self)
-        act_custom_fields.triggered.connect(self._action_custom_fields)
-        edit_menu.addAction(act_custom_fields)
 
         view_menu = mb.addMenu("&View")
         self._view_action_group = QActionGroup(self)
