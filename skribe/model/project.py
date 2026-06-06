@@ -48,6 +48,106 @@ class ItemType(str, Enum):
 
 
 @dataclass
+class LabelDef:
+    id: str
+    name: str
+    color: str = "#CCCCCC"
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "color": self.color}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "LabelDef":
+        return cls(id=d["id"], name=d["name"], color=d.get("color", "#CCCCCC"))
+
+
+@dataclass
+class StatusDef:
+    id: str
+    name: str
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "StatusDef":
+        return cls(id=d["id"], name=d["name"])
+
+
+
+class CustomFieldType(str, Enum):
+    TEXT = "text"
+    CHECKBOX = "checkbox"
+    LIST = "list"
+    DATE = "date"
+
+
+@dataclass
+class CustomFieldDef:
+    """A user-defined metadata field that appears as an outliner column."""
+    id: str = field(default_factory=_new_uuid)
+    name: str = ""
+    field_type: CustomFieldType = CustomFieldType.TEXT
+    default: str = ""
+    choices: list[str] = field(default_factory=list)
+    color: str = ""
+
+    def to_dict(self) -> dict:
+        d: dict = {
+            "id": self.id,
+            "name": self.name,
+            "field_type": self.field_type.value,
+        }
+        if self.default:
+            d["default"] = self.default
+        if self.choices:
+            d["choices"] = self.choices
+        if self.color:
+            d["color"] = self.color
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "CustomFieldDef":
+        ft = CustomFieldType.TEXT
+        raw_type = d.get("field_type", "text")
+        try:
+            ft = CustomFieldType(raw_type)
+        except ValueError:
+            pass
+        return cls(
+            id=d.get("id", _new_uuid()),
+            name=d.get("name", ""),
+            field_type=ft,
+            default=d.get("default", ""),
+            choices=d.get("choices", []),
+            color=d.get("color", ""),
+        )
+
+def default_label_defs() -> list[LabelDef]:
+    return [
+        LabelDef("0", "No Label", "#CCCCCC"),
+        LabelDef("1", "Red", "#FC3D39"),
+        LabelDef("2", "Orange", "#FF9500"),
+        LabelDef("3", "Yellow", "#FFCC00"),
+        LabelDef("4", "Green", "#4CD964"),
+        LabelDef("5", "Blue", "#5AC8FA"),
+        LabelDef("6", "Purple", "#5856D6"),
+    ]
+
+
+def default_status_defs() -> list[StatusDef]:
+    return [
+        StatusDef("0", "No Status"),
+        StatusDef("1", "To Do"),
+        StatusDef("2", "In Progress"),
+        StatusDef("3", "First Draft"),
+        StatusDef("4", "Revised Draft"),
+        StatusDef("5", "Final Draft"),
+        StatusDef("6", "Done"),
+    ]
+
+
+@dataclass
 class BinderItem:
     uuid: str = field(default_factory=_new_uuid)
     type: ItemType = ItemType.TEXT
@@ -132,6 +232,9 @@ class Project:
     modified: str = field(default_factory=_now_iso)
     roots: list[BinderItem] = field(default_factory=list)
     path: Optional[Path] = None
+    label_defs: list[LabelDef] = field(default_factory=default_label_defs)
+    status_defs: list[StatusDef] = field(default_factory=default_status_defs)
+    custom_field_defs: list[CustomFieldDef] = field(default_factory=list)
 
     @classmethod
     def new(cls, name: str = "Untitled") -> "Project":
@@ -183,6 +286,9 @@ class Project:
             "created": self.created,
             "modified": self.modified,
             "binder": [r.to_dict() for r in self.roots],
+            "label_defs": [ld.to_dict() for ld in self.label_defs],
+            "status_defs": [sd.to_dict() for sd in self.status_defs],
+            "custom_field_defs": [f.to_dict() for f in self.custom_field_defs],
         }
 
     @classmethod
@@ -195,4 +301,26 @@ class Project:
             path=path,
         )
         project.roots = [BinderItem.from_dict(r) for r in data.get("binder", [])]
+        project.label_defs = [LabelDef.from_dict(d) for d in data.get("label_defs", [])] or default_label_defs()
+        project.status_defs = [StatusDef.from_dict(d) for d in data.get("status_defs", [])] or default_status_defs()
+        project.custom_field_defs = [CustomFieldDef.from_dict(d) for d in data.get("custom_field_defs", [])]
         return project
+
+    def label_for_id(self, label_id: str) -> Optional[LabelDef]:
+        for ld in self.label_defs:
+            if ld.id == label_id:
+                return ld
+        return None
+
+    def status_for_id(self, status_id: str) -> Optional[StatusDef]:
+        for sd in self.status_defs:
+            if sd.id == status_id:
+                return sd
+        return None
+
+
+    def custom_field_for_id(self, field_id: str) -> Optional[CustomFieldDef]:
+        for f in self.custom_field_defs:
+            if f.id == field_id:
+                return f
+        return None

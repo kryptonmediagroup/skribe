@@ -20,6 +20,13 @@ from skribe.model.project import BinderItem, ItemType, Project
 UUID_ROLE = Qt.UserRole + 1
 TYPE_ROLE = Qt.UserRole + 2
 SYNOPSIS_ROLE = Qt.UserRole + 3
+WORD_COUNT_ROLE = Qt.UserRole + 4
+TARGET_ROLE = Qt.UserRole + 5
+LABEL_ID_ROLE = Qt.UserRole + 6
+STATUS_ID_ROLE = Qt.UserRole + 7
+INCLUDE_ROLE = Qt.UserRole + 8
+CREATED_ROLE = Qt.UserRole + 9
+MODIFIED_ROLE = Qt.UserRole + 10
 
 BINDER_MIME = "application/x-skribe-binder-uuid"
 
@@ -133,6 +140,18 @@ class BinderModel(QAbstractItemModel):
             return item.type.value
         if role == SYNOPSIS_ROLE:
             return item.synopsis or ""
+        if role == LABEL_ID_ROLE:
+            return item.metadata.get("label_id", "")
+        if role == STATUS_ID_ROLE:
+            return item.metadata.get("status_id", "")
+        if role == INCLUDE_ROLE:
+            return bool(item.metadata.get("include_in_compile", True))
+        if role == CREATED_ROLE:
+            return item.created
+        if role == MODIFIED_ROLE:
+            return item.modified
+        if role == TARGET_ROLE:
+            return item.metadata.get("target_word_count", 0)
         if role == Qt.ToolTipRole:
             return f"{item.type.value}  ·  {item.uuid}"
         return None

@@ -32,7 +32,7 @@ from skribe.ioformat.doc_convert import has_pandoc, run_pandoc
 from skribe.ioformat.doc_export import _inject_rtf_annotations, _wrap_comment_markers_in_html
 from skribe.ioformat.skribe_io import read_comments, read_document_body
 from skribe.model.comment import Comment
-from skribe.model.project import BinderItem, ItemType, Project
+from skribe.model.project import BinderItem, CustomFieldDef, CustomFieldType, ItemType, LabelDef, Project, StatusDef
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +69,58 @@ def _to_scriv_date(iso_dt: str) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S %z")
 
 
+def _hex_to_scriv_color(hex_color: str) -> str:
+    """Convert '#FD3938' to '0.992 0.224 0.220'."""
+    hex_color = hex_color.lstrip("#")
+    try:
+        r = int(hex_color[0:2], 16) / 255.0
+        g = int(hex_color[2:4], 16) / 255.0
+        b = int(hex_color[4:6], 16) / 255.0
+        return f"{r:.3f} {g:.3f} {b:.3f}"
+    except (ValueError, IndexError):
+        return "0.800 0.800 0.800"
+
+
+def _build_label_settings(label_defs: list[LabelDef]) -> etree._Element:
+    ls = etree.Element("LabelSettings")
+    labels = etree.SubElement(ls, "Labels")
+    for ld in label_defs:
+        el = etree.SubElement(labels, "Label", ID=ld.id, Color=_hex_to_scriv_color(ld.color))
+        el.text = ld.name
+    return ls
+
+
+def _build_status_settings(status_defs: list[StatusDef]) -> etree._Element:
+    ss = etree.Element("StatusSettings")
+    items = etree.SubElement(ss, "StatusItems")
+    for sd in status_defs:
+        el = etree.SubElement(items, "Status", ID=sd.id)
+        el.text = sd.name
+    return ss
+
+def _build_custom_meta_settings(field_defs: list[CustomFieldDef]) -> Optional[etree._Element]:
+    if not field_defs:
+        return None
+    cms = etree.Element("CustomMetaDataSettings")
+    for fd in field_defs:
+        mdf = etree.SubElement(cms, "MetaDataField")
+        fid_el = etree.SubElement(mdf, "FieldID")
+        fid_el.text = fd.id
+        title_el = etree.SubElement(mdf, "Title")
+        title_el.text = fd.name
+        type_el = etree.SubElement(mdf, "Type")
+        type_el.text = fd.field_type.value.capitalize()
+        if fd.default:
+            def_el = etree.SubElement(mdf, "DefaultValue")
+            def_el.text = fd.default
+        if fd.choices:
+            lv_el = etree.SubElement(mdf, "ListValues")
+            for choice in fd.choices:
+                c_el = etree.SubElement(lv_el, "ListValue")
+                c_el.text = choice
+    return cms
+
+
 # --- Binder XML builder --------------------------------------------------
 
 def _build_metadata_element(meta: dict) -> Optional[etree._Element]:
@@ -88,6 +140,13 @@ def _build_metadata_element(meta: dict) -> Optional[etree._Element]:
     if status_id:
         sub = etree.SubElement(el, "StatusID")
         sub.text = str(status_id)
+        wrote_anything = True
+    custom = meta.get("custom")
+    if custom:
+        cmd_el = etree.SubElement(el, "CustomMetaData")
+        for field_id, value in custom.items():
+            mdi = etree.SubElement(cmd_el, "MetaDataItem", FieldID=field_id)
+            mdi.text = str(value)
         wrote_anything = True
     return el if wrote_anything else None
 
@@ -131,6 +190,11 @@ def _build_scrivx(project: Project) -> bytes:
     binder = etree.SubElement(root, "Binder")
     for top in project.roots:
         binder.append(_build_binder_item_element(top))
+    root.append(_build_label_settings(project.label_defs))
+    root.append(_build_status_settings(project.status_defs))
+    cms = _build_custom_meta_settings(project.custom_field_defs)
+    if cms is not None:
+        root.append(cms)
     return etree.tostring(
         root,
         pretty_print=True,

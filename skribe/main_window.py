@@ -79,6 +79,7 @@ from skribe.themes import theme_for
 from skribe.ui.binder_view import BinderView
 from skribe.ui.comments_panel import CommentsPanel
 from skribe.ui.corkboard_view import CorkboardView
+from skribe.ui.outliner_view import OutlinerProxyModel, OutlinerView
 from skribe.ui.editor import EditorWidget, ZOOM_PRESETS, smartify_html
 from skribe.ui.inspector import InspectorWidget
 from skribe.ui.compile_dialog import CompileDialog
@@ -97,9 +98,11 @@ from skribe.ui.search_panel import (
 )
 from skribe.ui.statistics import StatisticsDialog
 from skribe.ui.find_replace_dialog import FindReplaceDialog
+from skribe.ui.custom_fields_dialog import CustomFieldsDialog
 
 VIEW_EDITOR = "editor"
 VIEW_CORKBOARD = "corkboard"
+VIEW_OUTLINER = "outliner"
 
 APP_ORG = "Skribe"
 APP_NAME = "Skribe"
@@ -122,17 +125,21 @@ class MainWindow(QMainWindow):
         self._comments_dirty = False
 
         self._view_mode = str(self._settings.get(Keys.VIEW_MODE) or VIEW_EDITOR)
-        if self._view_mode not in (VIEW_EDITOR, VIEW_CORKBOARD):
+        if self._view_mode not in (VIEW_EDITOR, VIEW_CORKBOARD, VIEW_OUTLINER):
             self._view_mode = VIEW_EDITOR
 
         self._binder_view = BinderView(self)
         self._editor = EditorWidget(self)
         self._corkboard = CorkboardView(self)
+        self._outliner = OutlinerView(self)
+        self._outliner_proxy = OutlinerProxyModel(self)
         self._inspector = InspectorWidget(self)
         self._comments_panel = CommentsPanel(self)
         self._model = BinderModel(parent=self)
         self._binder_view.setModel(self._model)
         self._corkboard.setModel(self._model)
+        self._outliner_proxy.setSourceModel(self._model)
+        self._outliner.set_outliner_model(self._outliner_proxy)
 
         # Search state. ``_search_panel`` is created lazily the first
         # time the user opens the Search tab; closing the tab tears it
@@ -176,6 +183,7 @@ class MainWindow(QMainWindow):
         self._center_stack = QStackedWidget(self)
         self._center_stack.addWidget(self._editor)     # index 0
         self._center_stack.addWidget(self._corkboard)  # index 1
+        self._center_stack.addWidget(self._outliner)   # index 2
 
         right_split = QSplitter(Qt.Vertical, self)
         right_split.addWidget(self._inspector)
@@ -265,6 +273,8 @@ class MainWindow(QMainWindow):
         self._comments_panel.comment_selected.connect(self._on_comment_selected)
         self._corkboard.card_activated.connect(self._on_corkboard_activated)
         self._corkboard.context_menu_requested.connect(self._on_corkboard_context_menu)
+        self._outliner.item_activated.connect(self._on_outliner_activated)
+        self._outliner.context_menu_requested.connect(self._on_outliner_context_menu)
 
         # TTS: editor's read-selection request (from context menu)
         self._editor.read_selection_requested.connect(self._action_read_selection)
@@ -395,6 +405,10 @@ class MainWindow(QMainWindow):
         act_prefs.triggered.connect(self._action_preferences)
         edit_menu.addAction(act_prefs)
 
+        act_custom_fields = QAction("Custom &Metadata Fields...", self)
+        act_custom_fields.triggered.connect(self._action_custom_fields)
+        edit_menu.addAction(act_custom_fields)
+
         view_menu = mb.addMenu("&View")
         self._view_action_group = QActionGroup(self)
         self._view_action_group.setExclusive(True)
@@ -411,8 +425,16 @@ class MainWindow(QMainWindow):
         self._view_action_group.addAction(self._act_view_corkboard)
         view_menu.addAction(self._act_view_corkboard)
 
+        self._act_view_outliner = QAction("&Outliner", self, checkable=True)
+        self._act_view_outliner.setShortcut(QKeySequence("Ctrl+3"))
+        self._act_view_outliner.triggered.connect(lambda: self._set_view_mode(VIEW_OUTLINER))
+        self._view_action_group.addAction(self._act_view_outliner)
+        view_menu.addAction(self._act_view_outliner)
+
         if self._view_mode == VIEW_CORKBOARD:
             self._act_view_corkboard.setChecked(True)
+        elif self._view_mode == VIEW_OUTLINER:
+            self._act_view_outliner.setChecked(True)
         else:
             self._act_view_editor.setChecked(True)
 
@@ -722,7 +744,9 @@ class MainWindow(QMainWindow):
         self._ui_state = {}
         self._current_comments = {}
         self._comments_dirty = False
-        self._model.set_project(Project.new())
+        new_project = Project.new()
+        self._model.set_project(new_project)
+        self._outliner.set_project(new_project)
         self._editor.clear()
         self._editor.clear_search_highlights()
         self._inspector.set_item(None)
@@ -1142,6 +1166,26 @@ class MainWindow(QMainWindow):
         self._act_spellcheck.setChecked(bool(self._settings.get(Keys.SPELLCHECK_ENABLED)))
         self._act_spellcheck.blockSignals(False)
 
+    def _action_custom_fields(self) -> None:
+        if self._project is None:
+            return
+        try:
+            current = list(self._project.custom_field_defs)
+        except AttributeError:
+            current = []
+        dlg = CustomFieldsDialog(current, parent=self)
+        dlg.fields_changed.connect(self._on_custom_fields_changed)
+        dlg.exec()
+
+    def _on_custom_fields_changed(self, new_defs) -> None:
+        if self._project is None:
+            return
+        self._project.custom_field_defs = new_defs
+        self._project.touch()
+        # Refresh the outliner to pick up new/changed columns.
+        self._outliner.set_project(self._project)
+        self._apply_view_for_current_item()
+
     def _toggle_spellcheck(self, enabled: bool) -> None:
         self._editor.set_spellcheck_enabled(enabled)
 
@@ -1206,6 +1250,7 @@ class MainWindow(QMainWindow):
         apply_theme(theme)
         self._editor.apply_theme(theme)
         self._corkboard.apply_theme(theme)
+        self._outliner.apply_theme(theme)
 
     def _apply_current_settings(self) -> None:
         """Called after the Preferences dialog writes new values."""
@@ -1222,6 +1267,7 @@ class MainWindow(QMainWindow):
         self._project = project
         self._current_item = None
         self._model.set_project(project)
+        self._outliner.set_project(project)
         self._editor.clear()
         self._inspector.set_item(None)
         self._binder_view.expandAll()
@@ -1232,6 +1278,10 @@ class MainWindow(QMainWindow):
             self._register_recent(project.path)
         else:
             self._ui_state = {}
+        # Restore outliner column layout from the previous session.
+        outliner_cols = self._ui_state.get("outliner_columns")
+        if outliner_cols:
+            self._outliner.restore_column_state(outliner_cols)
 
         # If the search tab survived from a previous project, re-run
         # the query against the new content so its result list is
@@ -1642,10 +1692,10 @@ class MainWindow(QMainWindow):
             self._editor.reveal_position(ranges[0][0])
             self._editor.set_focus()
 
-    # --- view mode / corkboard --------------------------------------
+    # --- view mode / corkboard / outliner --------------------------------
 
     def _set_view_mode(self, mode: str) -> None:
-        if mode not in (VIEW_EDITOR, VIEW_CORKBOARD):
+        if mode not in (VIEW_EDITOR, VIEW_CORKBOARD, VIEW_OUTLINER):
             return
         if mode == self._view_mode:
             return
@@ -1656,8 +1706,9 @@ class MainWindow(QMainWindow):
     def _apply_view_for_current_item(self) -> None:
         """Pick the right stack page based on selection + view mode.
 
-        Text items always use the editor. Containers use the corkboard if
-        view mode is ``corkboard``; otherwise the (blank, disabled) editor.
+        Text items always use the editor. Containers use the corkboard or
+        outliner when the corresponding mode is active; otherwise the
+        (blank, disabled) editor.
         """
         item = self._current_item
         if item is None or not item.type.is_container:
@@ -1667,6 +1718,14 @@ class MainWindow(QMainWindow):
             self._corkboard.setRootIndex(self._model.index_for_item(item))
             self._corkboard.clearSelection()
             self._center_stack.setCurrentWidget(self._corkboard)
+        elif self._view_mode == VIEW_OUTLINER:
+            proxy_idx = self._outliner_proxy.mapFromSource(
+                self._model.index_for_item(item)
+            )
+            self._outliner.setRootIndex(proxy_idx)
+            self._outliner.clearSelection()
+            self._refresh_outliner_word_counts()
+            self._center_stack.setCurrentWidget(self._outliner)
         else:
             self._center_stack.setCurrentWidget(self._editor)
 
@@ -1722,6 +1781,73 @@ class MainWindow(QMainWindow):
         self._binder_view.setCurrentIndex(index)
         self._binder_view.scrollTo(index)
         self._binder_view.setFocus()
+
+    # --- outliner -------------------------------------------------------
+
+    def _on_outliner_activated(self, proxy_index) -> None:
+        if not proxy_index.isValid():
+            return
+        src_index = self._outliner_proxy.mapToSource(proxy_index)
+        if src_index.isValid():
+            self._binder_view.setCurrentIndex(src_index)
+
+    def _on_outliner_context_menu(self, proxy_index, global_pos) -> None:
+        menu = QMenu(self)
+
+        add_menu = menu.addMenu("Add Item")
+        act_new_text = add_menu.addAction("New Text")
+        act_new_text.triggered.connect(lambda: self._outliner_add(ItemType.TEXT))
+        act_new_folder = add_menu.addAction("New Folder")
+        act_new_folder.triggered.connect(lambda: self._outliner_add(ItemType.FOLDER))
+
+        if proxy_index.isValid():
+            menu.addSeparator()
+            act_open = menu.addAction("Open")
+            act_open.triggered.connect(lambda: self._on_outliner_activated(proxy_index))
+            act_reveal = menu.addAction("Reveal in Binder")
+            act_reveal.triggered.connect(lambda: self._outliner_reveal_in_binder(proxy_index))
+
+            menu.addSeparator()
+            act_rename = menu.addAction("Rename")
+            # Edit the title column (column 0) of the clicked row.
+            title_idx = self._outliner_proxy.index(
+                proxy_index.row(), 0, proxy_index.parent()
+            )
+            act_rename.triggered.connect(lambda: self._outliner.edit(title_idx))
+
+            menu.addSeparator()
+            act_trash = menu.addAction("Move to Trash")
+            src_idx = self._outliner_proxy.mapToSource(proxy_index)
+            act_trash.triggered.connect(lambda: self._on_delete_requested(src_idx))
+
+        menu.exec(global_pos)
+
+    def _outliner_add(self, item_type: ItemType) -> None:
+        parent_idx = self._outliner.rootIndex()
+        if not parent_idx.isValid():
+            return
+        src_parent = self._outliner_proxy.mapToSource(parent_idx)
+        new_idx = self._model.add_item(src_parent, item_type)
+        if new_idx.isValid():
+            proxy_new = self._outliner_proxy.mapFromSource(new_idx)
+            self._outliner.setCurrentIndex(proxy_new)
+            self._outliner.edit(proxy_new)
+
+    def _outliner_reveal_in_binder(self, proxy_index) -> None:
+        if not proxy_index.isValid():
+            return
+        src_index = self._outliner_proxy.mapToSource(proxy_index)
+        parent = src_index.parent()
+        while parent.isValid():
+            self._binder_view.expand(parent)
+            parent = parent.parent()
+        self._binder_view.setCurrentIndex(src_index)
+        self._binder_view.scrollTo(src_index)
+        self._binder_view.setFocus()
+
+    def _refresh_outliner_word_counts(self) -> None:
+        if self._project is not None and self._project.path is not None:
+            self._outliner.refresh_word_counts(self._project.path)
 
     def _on_editor_changed(self) -> None:
         self._dirty_editor = True
@@ -1813,6 +1939,9 @@ class MainWindow(QMainWindow):
             write_comments(bundle, uuid, kept)
         self._dirty_editor = False
         self._comments_dirty = False
+        # Refresh outliner word counts if the view is active and body changed.
+        if self._view_mode == VIEW_OUTLINER:
+            self._refresh_outliner_word_counts()
 
     def _record_current_cursor(self) -> None:
         if self._current_item is None or self._current_item.type.is_container:
@@ -1824,6 +1953,7 @@ class MainWindow(QMainWindow):
         if self._project is None or self._project.path is None:
             return
         self._record_current_cursor()
+        self._ui_state["outliner_columns"] = self._outliner.save_column_state()
         try:
             write_ui_state(self._project.path, self._ui_state)
         except OSError:
