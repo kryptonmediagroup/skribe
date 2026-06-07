@@ -768,20 +768,97 @@ class ComboDelegate(QStyledItemDelegate):
 
 
 class TextDelegate(QStyledItemDelegate):
-    """Inline text editor for custom meta TEXT fields."""
-    
+    """Inline text editor for custom meta TEXT fields with word wrap."""
+
+    _PAD = 4  # px horizontal padding each side
+
+    # -- display ---------------------------------------------------------
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        # Draw selection / hover / alternate-row background via the style.
+        self.initStyleOption(option, index)
+        style = option.widget.style() if option.widget else None
+        if style is None:
+            from PySide6.QtWidgets import QApplication
+            style = QApplication.style()
+        # Background only — we draw the text ourselves for word-wrap.
+        option.text = ""
+        style.drawControl(QStyle.CE_ItemViewItem, option, painter, option.widget)
+
+        text = index.data(Qt.DisplayRole) or ""
+        if not text:
+            return
+
+        rect = option.rect.adjusted(self._PAD, 2, -self._PAD, -2)
+        painter.save()
+        if option.state & QStyle.State_Selected:
+            painter.setPen(option.palette.highlightedText().color())
+        else:
+            painter.setPen(option.palette.text().color())
+        painter.setFont(option.font)
+        painter.drawText(rect, Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop, text)
+        painter.restore()
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex):
+        from PySide6.QtCore import QSize, QRect
+        from PySide6.QtGui import QFontMetrics
+
+        text = index.data(Qt.DisplayRole) or ""
+        width = option.rect.width() if option.rect.isValid() else 150
+        fm = QFontMetrics(option.font)
+        if not text:
+            return QSize(width, fm.height() + 4)
+        text_width = max(width - 2 * self._PAD, 30)
+        bounding = fm.boundingRect(
+            QRect(0, 0, text_width, 100000),
+            Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop,
+            text,
+        )
+        return QSize(width, max(bounding.height() + 6, fm.height() + 4))
+
+    # -- editor ----------------------------------------------------------
+
     def createEditor(self, parent: QWidget, option, index) -> QWidget:
-        from PySide6.QtWidgets import QLineEdit
-        editor = QLineEdit(parent)
-        editor.setFrame(False)
+        from PySide6.QtWidgets import QPlainTextEdit
+        from PySide6.QtGui import QTextOption
+
+        editor = QPlainTextEdit(parent)
+        editor.setFrameShape(QPlainTextEdit.NoFrame)
+        editor.setWordWrapMode(QTextOption.WordWrap)
+        editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        editor.setTabChangesFocus(True)
+        # Adjust height as the user types.
+        editor.document().contentsChanged.connect(
+            lambda: self._resize_editor(editor)
+        )
         return editor
+
+    def _resize_editor(self, editor) -> None:
+        doc = editor.document()
+        doc.setTextWidth(editor.viewport().width())
+        margins = editor.contentsMargins()
+        needed = int(doc.size().height()) + margins.top() + margins.bottom() + 4
+        geo = editor.geometry()
+        # Grow (or shrink) downward from the cell's top edge; never
+        # smaller than the original cell height stored by updateEditorGeometry.
+        min_h = getattr(editor, '_cell_height', geo.height())
+        target = max(needed, min_h)
+        if target != geo.height():
+            geo.setHeight(target)
+            editor.setGeometry(geo)
 
     def setEditorData(self, editor, index: QModelIndex) -> None:
         value = index.data(Qt.EditRole) or ""
-        editor.setText(str(value))
+        editor.setPlainText(str(value))
 
     def setModelData(self, editor, model, index: QModelIndex) -> None:
-        model.setData(index, editor.text(), Qt.EditRole)
+        model.setData(index, editor.toPlainText(), Qt.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index) -> None:
+        editor._cell_height = option.rect.height()
+        editor.setGeometry(option.rect)
+        self._resize_editor(editor)
 
 class DateDelegate(QStyledItemDelegate):
     """Inline date editor using a QDateEdit widget."""
@@ -836,6 +913,24 @@ class DateTimeDelegate(QStyledItemDelegate):
     def setModelData(self, editor, model, index: QModelIndex) -> None:
         model.setData(index, editor.dateTime().toUTC().toString(Qt.ISODate), Qt.EditRole)
 
+
+_RESIZE_MARGIN = 4  # px from row border for drag-resize grab
+
+
+class RowHeightDelegate(QStyledItemDelegate):
+    """Default item delegate that enforces per-row minimum heights set by drag-resize."""
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex):
+        sh = super().sizeHint(option, index)
+        view = self.parent()
+        if view is not None:
+            item = index.internalPointer()
+            if item is not None and hasattr(item, 'uuid'):
+                min_h = view._row_heights.get(item.uuid)
+                if min_h is not None and min_h > sh.height():
+                    sh.setHeight(min_h)
+        return sh
+
 # ---------------------------------------------------------------------------
 # Outliner view
 # ---------------------------------------------------------------------------
@@ -853,6 +948,8 @@ class OutlinerView(QTreeView):
         self._project: Project | None = None
         self._label_delegate: ComboDelegate | None = None
         self._status_delegate: ComboDelegate | None = None
+        self._row_heights: dict[str, int] = {}   # uuid → minimum row height
+        self._resize_row = None  # (QPersistentModelIndex, start_y, start_height)
 
         # -- selection & interaction --
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -862,6 +959,7 @@ class OutlinerView(QTreeView):
         self.setSortingEnabled(False)
         self.setAlternatingRowColors(True)
         self.setWordWrap(True)
+        self.setMouseTracking(True)
 
         # -- drag & drop --
         self.setDragEnabled(True)
@@ -919,6 +1017,9 @@ class OutlinerView(QTreeView):
         # Created / Modified datetime editors.
         self.setItemDelegateForColumn(int(OutlinerColumn.CREATED), DateTimeDelegate(self))
         self.setItemDelegateForColumn(int(OutlinerColumn.MODIFIED), DateTimeDelegate(self))
+        # Default delegate for all other columns — enforces row-height overrides.
+        self._row_height_delegate = RowHeightDelegate(self)
+        self.setItemDelegate(self._row_height_delegate)
 
     # -- project ---------------------------------------------------------
 
@@ -1023,12 +1124,71 @@ class OutlinerView(QTreeView):
         global_pos = self.viewport().mapToGlobal(pos)
         self.context_menu_requested.emit(idx, global_pos)
 
-    def mouseDoubleClickEvent(self, event) -> None:
-        idx = self.indexAt(event.pos())
-        if idx.isValid() and idx.column() == int(OutlinerColumn.TITLE):
-            self.item_activated.emit(idx)
+    # -- row resize (drag row-border) ------------------------------------
+
+    def _row_border_index(self, viewport_pos) -> QModelIndex | None:
+        """Return column-0 index of the row whose bottom border is near *viewport_pos*."""
+        idx = self.indexAt(viewport_pos)
+        if not idx.isValid():
+            return None
+        idx0 = idx.sibling(idx.row(), 0)
+        rect = self.visualRect(idx0)
+        y = viewport_pos.y()
+        # Near the top edge → resize the row above this one.
+        if y - rect.top() <= _RESIZE_MARGIN:
+            above = self.indexAbove(idx0)
+            if above.isValid():
+                return above.sibling(above.row(), 0)
+        # Near the bottom edge → resize this row.
+        if rect.bottom() - y <= _RESIZE_MARGIN:
+            return idx0
+        return None
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            pos = event.position().toPoint()
+            border = self._row_border_index(pos)
+            if border is not None:
+                rect = self.visualRect(border)
+                self._resize_row = (
+                    QPersistentModelIndex(border),
+                    pos.y(),
+                    rect.height(),
+                )
+                self.viewport().setCursor(Qt.SplitVCursor)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        pos = event.position().toPoint()
+        if self._resize_row is not None:
+            persist, start_y, start_h = self._resize_row
+            idx = QModelIndex(persist)
+            if idx.isValid():
+                item = idx.internalPointer()
+                if item is not None:
+                    delta = pos.y() - start_y
+                    new_h = max(start_h + delta, 20)
+                    self._row_heights[item.uuid] = new_h
+                    self.doItemsLayout()
+            event.accept()
+            return
+        # Change cursor when hovering near a row border.
+        border = self._row_border_index(pos)
+        if border is not None:
+            self.viewport().setCursor(Qt.SplitVCursor)
         else:
-            super().mouseDoubleClickEvent(event)
+            self.viewport().unsetCursor()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._resize_row is not None:
+            self._resize_row = None
+            self.viewport().unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     # -- word counts -----------------------------------------------------
 
@@ -1053,6 +1213,7 @@ class OutlinerView(QTreeView):
             "visible": self.visible_columns(),
             "order": [hdr.logicalIndex(i) for i in range(total)],
             "widths": {c: hdr.sectionSize(c) for c in range(total)},
+            "row_heights": dict(self._row_heights),
         }
 
     def restore_column_state(self, state: dict) -> None:
@@ -1084,9 +1245,23 @@ class OutlinerView(QTreeView):
                         hdr.resizeSection(col, w)
                 except (TypeError, ValueError):
                     pass
+        # Row heights.
+        rh = state.get("row_heights")
+        if isinstance(rh, dict):
+            self._row_heights = {k: v for k, v in rh.items() if isinstance(v, (int, float))}
 
     def mouseDoubleClickEvent(self, event) -> None:
-        idx = self.indexAt(event.position().toPoint())
+        pos = event.position().toPoint()
+        # Double-click on a row border → reset that row to its natural height.
+        border = self._row_border_index(pos)
+        if border is not None:
+            item = border.internalPointer()
+            if item is not None and hasattr(item, 'uuid'):
+                if self._row_heights.pop(item.uuid, None) is not None:
+                    self.doItemsLayout()
+            event.accept()
+            return
+        idx = self.indexAt(pos)
         if idx.isValid() and idx.column() == int(OutlinerColumn.TITLE):
             self.item_activated.emit(idx)
         elif idx.isValid() and idx.flags() & Qt.ItemIsEditable:
