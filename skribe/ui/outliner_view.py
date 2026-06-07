@@ -20,7 +20,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QAction, QColor, QPainter, QPen
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -532,6 +532,17 @@ class OutlinerProxyModel(QIdentityProxyModel):
                     return fd.name
         return None
 
+    def sibling(self, row: int, column: int, idx: QModelIndex) -> QModelIndex:
+        # QIdentityProxyModel.sibling() routes through mapToSource→source→mapFromSource,
+        # which fails for columns beyond the single-column source model.
+        # QTreeView.indexAt() uses siblingAtColumn() → sibling(), so without this override
+        # indexAt() always returns an invalid index for custom columns.
+        return self.index(row, column, self.parent(idx))
+
+    def buddy(self, index: QModelIndex) -> QModelIndex:
+        # Prevent QIdentityProxyModel.buddy() from collapsing all columns to 0 via mapToSource.
+        return index
+
     # -- drag & drop delegation ------------------------------------------
     # These must delegate to the source BinderModel so row DnD works.
 
@@ -682,7 +693,7 @@ class CheckBoxDelegate(QStyledItemDelegate):
         # Centre the checkbox.
         opt.displayAlignment = Qt.AlignCenter
         opt.text = ""
-        opt.icon = None  # type: ignore[assignment]
+        opt.icon = QIcon()
         widget = option.widget
         style = widget.style() if widget else None
         if style is not None:
@@ -754,6 +765,23 @@ class ComboDelegate(QStyledItemDelegate):
             model.setData(index, item_id, Qt.EditRole)
 
 
+
+
+class TextDelegate(QStyledItemDelegate):
+    """Inline text editor for custom meta TEXT fields."""
+    
+    def createEditor(self, parent: QWidget, option, index) -> QWidget:
+        from PySide6.QtWidgets import QLineEdit
+        editor = QLineEdit(parent)
+        editor.setFrame(False)
+        return editor
+
+    def setEditorData(self, editor, index: QModelIndex) -> None:
+        value = index.data(Qt.EditRole) or ""
+        editor.setText(str(value))
+
+    def setModelData(self, editor, model, index: QModelIndex) -> None:
+        model.setData(index, editor.text(), Qt.EditRole)
 
 class DateDelegate(QStyledItemDelegate):
     """Inline date editor using a QDateEdit widget."""
@@ -922,7 +950,7 @@ class OutlinerView(QTreeView):
                 self._status_delegate.set_items(items)
             except AttributeError:
                 pass  # status_defs not yet on Project
-
+    
     def _setup_custom_delegates(self) -> None:
         """Install delegates for custom field columns."""
         if self._project is None:
@@ -932,16 +960,17 @@ class OutlinerView(QTreeView):
         except AttributeError:
             return
         for i, fd in enumerate(defs):
-            col_idx = _NUM_COLUMNS + i
+            col_idx = _NUM_COLUMNS + i  # Calculate column index for each custom field
             if fd.field_type is CustomFieldType.CHECKBOX:
                 self.setItemDelegateForColumn(col_idx, CheckBoxDelegate(self))
             elif fd.field_type is CustomFieldType.LIST:
                 items = [(c, c) for c in fd.choices]
-                self.setItemDelegateForColumn(col_idx, ComboDelegate(items, parent=self))
+                self.setItemDelegateForColumn(col_idx, ComboDelegate(items, parent=self))  
             elif fd.field_type is CustomFieldType.DATE:
                 self.setItemDelegateForColumn(col_idx, DateDelegate(self))
-            # TEXT uses the default delegate — no special delegate needed
-
+            elif fd.field_type is CustomFieldType.TEXT:
+                self.setItemDelegateForColumn(col_idx, TextDelegate(self))
+            
     # -- column visibility -----------------------------------------------
 
     def set_visible_columns(self, columns: list) -> None:
@@ -1055,3 +1084,12 @@ class OutlinerView(QTreeView):
                         hdr.resizeSection(col, w)
                 except (TypeError, ValueError):
                     pass
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        idx = self.indexAt(event.position().toPoint())
+        if idx.isValid() and idx.column() == int(OutlinerColumn.TITLE):
+            self.item_activated.emit(idx)
+        elif idx.isValid() and idx.flags() & Qt.ItemIsEditable:
+            self.edit(idx, QAbstractItemView.EditTrigger.DoubleClicked, event)
+        else:
+            super().mouseDoubleClickEvent(event)

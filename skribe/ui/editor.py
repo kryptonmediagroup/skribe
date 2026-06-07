@@ -317,6 +317,14 @@ class _Editor(QTextEdit):
         menu.insertSeparator(first)
 
         menu.exec(event.globalPos())
+    def mouseDoubleClickEvent(self, event):
+        cursor = self.textCursor()
+        fmt = cursor.charFormat()
+        cid = fmt.property(COMMENT_ID_PROP)
+        if cid:
+            self._owner.comment_anchor_requested.emit(cid)
+        else:
+            super().mouseDoubleClickEvent(event)
 
 
 def _clamp_zoom(percent: int) -> int:
