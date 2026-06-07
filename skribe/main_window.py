@@ -4,6 +4,8 @@ Three-pane layout: binder (left) | editor (center) | inspector (right).
 Save-on-switch semantics: when the binder selection changes, the current
 document is flushed to disk before the new one is loaded, and its cursor
 position is recorded in the per-project ``ui_state.json``.
+
+This is the main project part, and everything else hooks up to it.  Happy writing .- Gene
 """
 from __future__ import annotations
 
