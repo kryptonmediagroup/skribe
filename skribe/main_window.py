@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QPoint, QSettings, QThread, QTimer, Signal, Qt
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -1567,13 +1567,24 @@ class MainWindow(QMainWindow):
                 self._editor.set_html(read_document_body(self._project.path, self._current_item.uuid))
             self._find_replace_dialog.update_status(f"Replaced {count} occurrences")
         else:
-            text = self._editor._text.toPlainText()
-            count = text.count(find_text)
-            new_text = text.replace(find_text, replace_text)
-            cursor = self._editor._text.textCursor()
-            cursor.selectAll()
-            cursor.insertText(new_text)
-            self._find_replace_dialog.update_status(f"Replaced {count} occurrences")
+            from PySide6.QtGui import QTextDocument
+            options = QTextDocument.FindFlag(0)
+            if whole_word:
+                options |= QTextDocument.FindFlag.FindWholeWords
+            doc = self._editor._text.document()
+            cursor = QTextCursor(doc)
+            cursor.beginEditBlock()
+            count = 0
+            # Start searching from the top of the document.
+            cursor.movePosition(QTextCursor.Start)
+            while True:
+                cursor = doc.find(find_text, cursor, options)
+                if cursor.isNull() or not cursor.hasSelection():
+                    break
+                cursor.insertText(replace_text)
+                count += 1
+            cursor.endEditBlock()
+            self._find_replace_dialog.update_status(f"Replaced {count} occurrence{'s' if count != 1 else ''}")
 
     def _on_left_tab_close(self, index: int) -> None:
         widget = self._left_tabs.widget(index)

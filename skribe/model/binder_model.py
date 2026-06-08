@@ -153,7 +153,7 @@ class BinderModel(QAbstractItemModel):
         if role == TARGET_ROLE:
             return item.metadata.get("target_word_count", 0)
         if role == Qt.ToolTipRole:
-            return f"{item.type.value}  ·  {item.uuid}"
+            return item.title or "(untitled)"
         return None
 
     def setData(self, index: QModelIndex, value, role: int = Qt.EditRole) -> bool:
