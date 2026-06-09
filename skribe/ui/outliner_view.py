@@ -980,7 +980,7 @@ class OutlinerView(QTreeView):
         # -- header --
         hdr = self.header()
         hdr.setSectionsMovable(True)
-        hdr.setStretchLastSection(False)
+        hdr.setStretchLastSection(True)
         hdr.setDefaultSectionSize(100)
         hdr.setContextMenuPolicy(Qt.CustomContextMenu)
         hdr.customContextMenuRequested.connect(self._show_header_context_menu)
@@ -998,8 +998,7 @@ class OutlinerView(QTreeView):
         """Initial column visibility and sizing."""
         hdr = self.header()
         total = self._proxy._total_column_count if self._proxy else _NUM_COLUMNS
-        hdr.setSectionResizeMode(int(OutlinerColumn.TITLE), QHeaderView.Stretch)
-        for col in range(1, total):
+        for col in range(total):
             hdr.setSectionResizeMode(col, QHeaderView.Interactive)
         self.set_visible_columns(DEFAULT_COLUMNS)
 
