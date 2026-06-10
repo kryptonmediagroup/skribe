@@ -265,6 +265,10 @@ def export_scriv(project: Project, out_scriv: Path) -> Path:
     # version marker
     (files_dir / "version.txt").write_text(SCRIV_FILES_VERSION, encoding="utf-8")
 
+    # Empty placeholder that Scrivener creates on open; must exist so
+    # Scrivener doesn't treat its absence as a corrupt bundle.
+    (files_dir / "binder.autosave").touch()
+
     # Per-document RTFs + synopses.
     skipped: list[str] = []
     for item in project.walk():
