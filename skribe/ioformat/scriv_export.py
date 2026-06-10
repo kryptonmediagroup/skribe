@@ -23,6 +23,7 @@ import html as _html
 import io
 import logging
 import shutil
+import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -85,7 +86,10 @@ def _hex_to_scriv_color(hex_color: str) -> str:
 
 def _build_label_settings(label_defs: list[LabelDef]) -> etree._Element:
     ls = etree.Element("LabelSettings")
+    etree.SubElement(ls, "Title").text = "Label"
+    etree.SubElement(ls, "DefaultLabelID").text = "-1"
     labels = etree.SubElement(ls, "Labels")
+    etree.SubElement(labels, "Label", ID="-1").text = "No Label"
     for ld in label_defs:
         el = etree.SubElement(labels, "Label", ID=ld.id, Color=_hex_to_scriv_color(ld.color))
         el.text = ld.name
@@ -94,36 +98,52 @@ def _build_label_settings(label_defs: list[LabelDef]) -> etree._Element:
 
 def _build_status_settings(status_defs: list[StatusDef]) -> etree._Element:
     ss = etree.Element("StatusSettings")
+    etree.SubElement(ss, "Title").text = "Status"
+    etree.SubElement(ss, "DefaultStatusID").text = "-1"
     items = etree.SubElement(ss, "StatusItems")
+    etree.SubElement(items, "Status", ID="-1").text = "No Status"
     for sd in status_defs:
-        el = etree.SubElement(items, "Status", ID=sd.id)
-        el.text = sd.name
+        etree.SubElement(items, "Status", ID=sd.id).text = sd.name
     return ss
+
 
 def _build_custom_meta_settings(field_defs: list[CustomFieldDef]) -> Optional[etree._Element]:
     if not field_defs:
         return None
     cms = etree.Element("CustomMetaDataSettings")
     for fd in field_defs:
-        mdf = etree.SubElement(cms, "MetaDataField")
-        fid_el = etree.SubElement(mdf, "FieldID")
-        fid_el.text = fd.id
-        title_el = etree.SubElement(mdf, "Title")
-        title_el.text = fd.name
-        type_el = etree.SubElement(mdf, "Type")
-        type_el.text = fd.field_type.value.capitalize()
-        if fd.default:
-            def_el = etree.SubElement(mdf, "DefaultValue")
-            def_el.text = fd.default
-        if fd.choices:
-            lv_el = etree.SubElement(mdf, "ListValues")
-            for choice in fd.choices:
-                c_el = etree.SubElement(lv_el, "ListValue")
-                c_el.text = choice
+        mdf = etree.SubElement(cms, "MetaDataField",
+            Type=fd.field_type.value.capitalize(),
+            ID=fd.id,
+            Wraps="Yes",
+            Color="0.800 0.800 0.800",
+            Align="Left")
+        etree.SubElement(mdf, "Title").text = fd.name
     return cms
 
 
+def _build_collections() -> etree._Element:
+    cols = etree.Element("Collections")
+    binder_col = etree.SubElement(cols, "Collection",
+        Type="Binder",
+        ID=str(uuid.uuid4()).upper(),
+        Color="0.941176 0.937255 0.956863")
+    etree.SubElement(binder_col, "Title").text = "Binder"
+    search_col = etree.SubElement(cols, "Collection",
+        Type="RecentSearch",
+        ID=str(uuid.uuid4()).upper(),
+        Color="0.901961 0.901961 0.980392")
+    etree.SubElement(search_col, "Title").text = "Search Results"
+    etree.SubElement(search_col, "SearchSettings",
+        Operator="Any", Type="All", Scope="All",
+        CompileSetting="All", CaseSensitive="No", IgnoreDiacritics="No")
+    return cols
+
+
 # --- Binder XML builder --------------------------------------------------
+
+_NO_TEXT_SETTINGS = {ItemType.DRAFT_FOLDER, ItemType.RESEARCH_FOLDER, ItemType.TRASH_FOLDER}
+
 
 def _build_metadata_element(meta: dict) -> Optional[etree._Element]:
     """Produce a ``<MetaData>`` element from our stored dict, or None if empty."""
@@ -169,7 +189,11 @@ def _build_binder_item_element(item: BinderItem) -> etree._Element:
     if meta_el is not None:
         el.append(meta_el)
     else:
-        el.append(etree.Element("MetaData"))  # empty but present, matches sample
+        el.append(etree.Element("MetaData"))
+
+    if item.type not in _NO_TEXT_SETTINGS:
+        ts = etree.SubElement(el, "TextSettings")
+        etree.SubElement(ts, "TextSelection").text = "0,0"
 
     if item.children:
         children_el = etree.SubElement(el, "Children")
@@ -192,6 +216,7 @@ def _build_scrivx(project: Project) -> bytes:
     binder = etree.SubElement(root, "Binder")
     for top in project.roots:
         binder.append(_build_binder_item_element(top))
+    root.append(_build_collections())
     root.append(_build_label_settings(project.label_defs))
     root.append(_build_status_settings(project.status_defs))
     cms = _build_custom_meta_settings(project.custom_field_defs)
