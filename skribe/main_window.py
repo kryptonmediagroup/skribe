@@ -708,6 +708,9 @@ class MainWindow(QMainWindow):
         dlg.setNameFilter("Skribe projects (*.skribe)")
         dlg.setDefaultSuffix("skribe")
         if self._project.path is not None:
+            # Set the directory to the bundle's parent and the filename to the
+            # bundle name, so the dialog opens alongside the project, not inside it.
+            dlg.setDirectory(str(self._project.path.parent))
             dlg.selectFile(self._project.path.name)
         if dlg.exec() != QFileDialog.Accepted:
             return
