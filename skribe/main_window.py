@@ -9,6 +9,7 @@ This is the main project part, and everything else hooks up to it.  Happy writin
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -699,39 +700,62 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Saved", 2000)
 
     def _action_save_as(self) -> None:
+        """Save the open project under a new name as a plain file operation.
+
+        Copy the on-disk bundle to a sibling directory the user names, edit
+        only the ``name`` field in the copy's project.json, then open it. The
+        in-memory model is never used to rebuild the bundle — the copy is a
+        byte-for-byte duplicate of what's on disk.
+        """
         if self._project is None:
             return
-        self._flush_current_editor()
+        src_path = self._project.path
+        if src_path is None:
+            self._notify_save_failure("Save As", "Save the project once before Save As.")
+            return
+
         dlg = QFileDialog(self, "Save Project As…")
         dlg.setAcceptMode(QFileDialog.AcceptSave)
         dlg.setFileMode(QFileDialog.AnyFile)
         dlg.setNameFilter("Skribe projects (*.skribe)")
         dlg.setDefaultSuffix("skribe")
-        if self._project.path is not None:
-            # Set the directory to the bundle's parent and the filename to the
-            # bundle name, so the dialog opens alongside the project, not inside it.
-            dlg.setDirectory(str(self._project.path.parent))
-            dlg.selectFile(self._project.path.name)
+        # Open in the bundle's parent with a *new* suggested name. Never
+        # pre-select the bundle's own directory name: QFileDialog treats an
+        # existing directory passed to selectFile() as a folder to navigate
+        # INTO, which would hand back a path inside the bundle and make the
+        # copy below recurse into itself.
+        dlg.setDirectory(str(src_path.parent))
+        dlg.selectFile(f"{src_path.stem} copy.skribe")
         if dlg.exec() != QFileDialog.Accepted:
             return
-        new_path = Path(dlg.selectedFiles()[0]).resolve()
+
+        new_path = Path(dlg.selectedFiles()[0])
         if new_path.suffix != ".skribe":
             new_path = new_path.with_suffix(".skribe")
-        src_path = self._project.path.resolve() if self._project.path is not None else None
-        if new_path == src_path:
+
+        # Same location → plain save.
+        if new_path.resolve() == src_path.resolve():
+            self._flush_current_editor()
             save_project(self._project)
             self._persist_ui_state()
             self._notify_save_success("Save", "Project saved.")
             return
-        if src_path is not None:
-            try:
-                new_path.relative_to(src_path)
-                self._notify_save_failure(
-                    "Save As", "Cannot save a project inside its own directory."
-                )
-                return
-            except ValueError:
-                pass
+
+        # Never let the destination live inside the source bundle, or the copy
+        # would duplicate the new folder into itself.
+        if src_path.resolve() in new_path.resolve().parents:
+            self._notify_save_failure(
+                "Save As", "Choose a location outside the current project folder."
+            )
+            return
+
+        # Flush the editor and write the current state to disk so the copy
+        # reflects what's on screen.
+        self._flush_current_editor()
+        save_project(self._project)
+        self._persist_ui_state()
+
+        # Confirm overwrite if the destination already exists.
         if new_path.exists():
             reply = QMessageBox.question(
                 self, "Save As", f"{new_path.name} already exists. Overwrite?",
@@ -740,18 +764,29 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
             shutil.rmtree(new_path)
+
         try:
-            if src_path is not None and src_path.exists():
-                shutil.copytree(src_path, new_path,
-                                ignore=shutil.ignore_patterns("*.skribe"))
-            self._project.name = new_path.stem
-            save_project(self._project, new_path)
-            self._persist_ui_state()
+            # Copy the bundle verbatim into the new directory.
+            shutil.copytree(src_path, new_path)
+
+            # Drop any stale lock carried over in the copy.
+            lock = new_path / "Files" / "user.lock"
+            lock.unlink(missing_ok=True)
+
+            # Rename the project by editing only the name field in the copied
+            # project.json — leave every other byte as copied.
+            manifest = new_path / "project.json"
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            data["name"] = new_path.stem
+            manifest.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
         except Exception as exc:  # noqa: BLE001
             self._notify_save_failure("Save As", f"Failed to save project:\n{exc}")
             return
-        self._register_recent(new_path)
-        self.setWindowTitle(f"Skribe — {self._project.name}")
+
+        # Open the newly created project.
+        self._load_project(load_project(new_path))
         self._notify_save_success("Save As", f"Saved as {new_path.name}")
 
     def _action_close(self) -> None:
