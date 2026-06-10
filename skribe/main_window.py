@@ -727,6 +727,15 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
             shutil.rmtree(new_path)
+        if self._project.path is not None:
+            try:
+                new_path.relative_to(self._project.path)
+                self._notify_save_failure(
+                    "Save As", "Cannot save a project inside its own directory."
+                )
+                return
+            except ValueError:
+                pass
         try:
             if self._project.path is not None and self._project.path.exists():
                 shutil.copytree(self._project.path, new_path)
