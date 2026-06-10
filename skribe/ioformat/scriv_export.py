@@ -177,8 +177,9 @@ def _build_metadata_element(meta: dict) -> Optional[etree._Element]:
         if valid:
             cmd_el = etree.SubElement(el, "CustomMetaData")
             for field_id, value in valid.items():
-                mdi = etree.SubElement(cmd_el, "MetaDataItem", FieldID=field_id)
-                mdi.text = str(value)
+                mdi = etree.SubElement(cmd_el, "MetaDataItem")
+                etree.SubElement(mdi, "FieldID").text = field_id
+                etree.SubElement(mdi, "Value").text = str(value)
             wrote_anything = True
     return el if wrote_anything else None
 
@@ -192,8 +193,8 @@ def _build_binder_item_element(item: BinderItem) -> etree._Element:
         Created=_to_scriv_date(item.created),
         Modified=_to_scriv_date(item.modified),
     )
-    title_el = etree.SubElement(el, "Title")
-    title_el.text = item.title or ""
+    if item.title:
+        etree.SubElement(el, "Title").text = item.title
 
     meta_el = _build_metadata_element(item.metadata or {})
     if meta_el is not None:
@@ -232,12 +233,10 @@ def _build_scrivx(project: Project) -> bytes:
     cms = _build_custom_meta_settings(project.custom_field_defs)
     if cms is not None:
         root.append(cms)
-    return etree.tostring(
-        root,
-        pretty_print=True,
-        xml_declaration=True,
-        encoding="UTF-8",
-    )
+    # lxml produces single-quoted XML declaration; Scrivener expects double-quoted.
+    xml_bytes = etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="UTF-8")
+    return xml_bytes.replace(b"<?xml version='1.0' encoding='UTF-8'?>",
+                             b'<?xml version="1.0" encoding="UTF-8"?>', 1)
 
 
 # --- HTML → RTF -----------------------------------------------------------
