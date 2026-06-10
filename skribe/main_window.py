@@ -711,14 +711,24 @@ class MainWindow(QMainWindow):
             dlg.selectFile(self._project.path.name)
         if dlg.exec() != QFileDialog.Accepted:
             return
-        new_path = Path(dlg.selectedFiles()[0])
+        new_path = Path(dlg.selectedFiles()[0]).resolve()
         if new_path.suffix != ".skribe":
             new_path = new_path.with_suffix(".skribe")
-        if new_path == self._project.path:
+        src_path = self._project.path.resolve() if self._project.path is not None else None
+        if new_path == src_path:
             save_project(self._project)
             self._persist_ui_state()
             self._notify_save_success("Save", "Project saved.")
             return
+        if src_path is not None:
+            try:
+                new_path.relative_to(src_path)
+                self._notify_save_failure(
+                    "Save As", "Cannot save a project inside its own directory."
+                )
+                return
+            except ValueError:
+                pass
         if new_path.exists():
             reply = QMessageBox.question(
                 self, "Save As", f"{new_path.name} already exists. Overwrite?",
@@ -727,18 +737,10 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
             shutil.rmtree(new_path)
-        if self._project.path is not None:
-            try:
-                new_path.relative_to(self._project.path)
-                self._notify_save_failure(
-                    "Save As", "Cannot save a project inside its own directory."
-                )
-                return
-            except ValueError:
-                pass
         try:
-            if self._project.path is not None and self._project.path.exists():
-                shutil.copytree(self._project.path, new_path)
+            if src_path is not None and src_path.exists():
+                shutil.copytree(src_path, new_path,
+                                ignore=shutil.ignore_patterns("*.skribe"))
             self._project.name = new_path.stem
             save_project(self._project, new_path)
             self._persist_ui_state()
