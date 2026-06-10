@@ -89,9 +89,14 @@ def _build_label_settings(label_defs: list[LabelDef]) -> etree._Element:
     etree.SubElement(ls, "Title").text = "Label"
     etree.SubElement(ls, "DefaultLabelID").text = "-1"
     labels = etree.SubElement(ls, "Labels")
-    etree.SubElement(labels, "Label", ID="-1").text = "No Label"
+    # Scrivener uses "-1" as the "no label" sentinel. Skribe defaults use "0"
+    # for the same purpose; remap on export so there's exactly one sentinel entry.
+    has_sentinel = any(ld.id in ("-1", "0") for ld in label_defs)
+    if not has_sentinel:
+        etree.SubElement(labels, "Label", ID="-1").text = "No Label"
     for ld in label_defs:
-        el = etree.SubElement(labels, "Label", ID=ld.id, Color=_hex_to_scriv_color(ld.color))
+        scriv_id = "-1" if ld.id == "0" else ld.id
+        el = etree.SubElement(labels, "Label", ID=scriv_id, Color=_hex_to_scriv_color(ld.color))
         el.text = ld.name
     return ls
 
@@ -101,9 +106,12 @@ def _build_status_settings(status_defs: list[StatusDef]) -> etree._Element:
     etree.SubElement(ss, "Title").text = "Status"
     etree.SubElement(ss, "DefaultStatusID").text = "-1"
     items = etree.SubElement(ss, "StatusItems")
-    etree.SubElement(items, "Status", ID="-1").text = "No Status"
+    has_sentinel = any(sd.id in ("-1", "0") for sd in status_defs)
+    if not has_sentinel:
+        etree.SubElement(items, "Status", ID="-1").text = "No Status"
     for sd in status_defs:
-        etree.SubElement(items, "Status", ID=sd.id).text = sd.name
+        scriv_id = "-1" if sd.id == "0" else sd.id
+        etree.SubElement(items, "Status", ID=scriv_id).text = sd.name
     return ss
 
 
@@ -165,11 +173,13 @@ def _build_metadata_element(meta: dict) -> Optional[etree._Element]:
         wrote_anything = True
     custom = meta.get("custom")
     if custom:
-        cmd_el = etree.SubElement(el, "CustomMetaData")
-        for field_id, value in custom.items():
-            mdi = etree.SubElement(cmd_el, "MetaDataItem", FieldID=field_id)
-            mdi.text = str(value)
-        wrote_anything = True
+        valid = {fid: val for fid, val in custom.items() if fid}
+        if valid:
+            cmd_el = etree.SubElement(el, "CustomMetaData")
+            for field_id, value in valid.items():
+                mdi = etree.SubElement(cmd_el, "MetaDataItem", FieldID=field_id)
+                mdi.text = str(value)
+            wrote_anything = True
     return el if wrote_anything else None
 
 
