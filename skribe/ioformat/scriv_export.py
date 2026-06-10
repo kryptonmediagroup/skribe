@@ -20,8 +20,10 @@ Out of scope here (Scrivener will fill in defaults or ignore):
 from __future__ import annotations
 
 import html as _html
+import io
 import logging
 import shutil
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -270,6 +272,7 @@ def export_scriv(project: Project, out_scriv: Path) -> Path:
     (files_dir / "binder.autosave").touch()
 
     # Per-document RTFs + synopses.
+    # binder.backup and scrivx_bytes are written after the scrivx is built.
     skipped: list[str] = []
     for item in project.walk():
         if item.type.is_container and not item.synopsis:
@@ -292,7 +295,16 @@ def export_scriv(project: Project, out_scriv: Path) -> Path:
     # .scrivx at the project root. Use the project name as the filename.
     scrivx_name = (project.name or "Skribe Project") + ".scrivx"
     scrivx_path = out_scriv / scrivx_name
-    scrivx_path.write_bytes(_build_scrivx(project))
+    scrivx_bytes = _build_scrivx(project)
+    scrivx_path.write_bytes(scrivx_bytes)
+
+    # binder.backup: ZIP archive containing the .scrivx. Scrivener reads
+    # this as the authoritative binder state; without it some versions
+    # treat the bundle as corrupt and refuse to open it.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(scrivx_name, scrivx_bytes)
+    (files_dir / "binder.backup").write_bytes(buf.getvalue())
 
     if skipped:
         log.warning(
