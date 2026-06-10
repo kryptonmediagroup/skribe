@@ -22,6 +22,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
+    QAbstractItemDelegate,
     QAbstractItemView,
     QComboBox,
     QHeaderView,
@@ -828,11 +829,21 @@ class TextDelegate(QStyledItemDelegate):
         editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         editor.setTabChangesFocus(True)
+        # Close the editor on Enter/Return instead of inserting a newline.
+        editor.installEventFilter(self)
         # Adjust height as the user types.
         editor.document().contentsChanged.connect(
             lambda: self._resize_editor(editor)
         )
         return editor
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.commitData.emit(obj)
+            self.closeEditor.emit(obj, QStyledItemDelegate.NoHint)
+            return True
+        return super().eventFilter(obj, event)
 
     def _resize_editor(self, editor) -> None:
         doc = editor.document()
@@ -1248,6 +1259,12 @@ class OutlinerView(QTreeView):
         rh = state.get("row_heights")
         if isinstance(rh, dict):
             self._row_heights = {k: v for k, v in rh.items() if isinstance(v, (int, float))}
+
+    def closeEditor(self, editor, hint):
+        """Suppress row navigation when the user presses Enter to finish editing."""
+        if hint in (QAbstractItemDelegate.EditNextItem, QAbstractItemDelegate.EditPreviousItem):
+            hint = QAbstractItemDelegate.NoHint
+        super().closeEditor(editor, hint)
 
     def mouseDoubleClickEvent(self, event) -> None:
         pos = event.position().toPoint()
