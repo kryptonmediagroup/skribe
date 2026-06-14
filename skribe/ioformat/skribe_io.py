@@ -4,6 +4,7 @@ Bundle layout::
 
     MyProject.skribe/
     ├── project.json            # manifest + binder tree (no document bodies)
+    ├── project.json.bak        # previous manifest (backup)
     ├── documents/
     │   └── {UUID}/
     │       └── content.html    # rich-text body (QTextDocument HTML)
@@ -20,6 +21,8 @@ from skribe.model.comment import Comment, comments_from_list, comments_to_list
 from skribe.model.project import Project
 
 PROJECT_FILE = "project.json"
+PROJECT_BACKUP = "project.json.bak"
+PROJECT_TMP = "project.json.tmp"
 UI_STATE_FILE = "ui_state.json"
 DOCS_DIR = "documents"
 BODY_FILE = "content.html"
@@ -40,7 +43,13 @@ def document_body_path(bundle: Path, uuid: str) -> Path:
 
 
 def is_skribe_bundle(path: Path) -> bool:
-    return path.is_dir() and (path / PROJECT_FILE).is_file()
+    if not path.is_dir():
+        return False
+    return (
+        (path / PROJECT_FILE).is_file()
+        or (path / PROJECT_BACKUP).is_file()
+        or (path / PROJECT_TMP).is_file()
+    )
 
 
 def ensure_bundle_layout(bundle: Path) -> None:
@@ -52,28 +61,57 @@ def ensure_bundle_layout(bundle: Path) -> None:
 
 
 def save_project(project: Project, path: Optional[Path] = None) -> Path:
-    """Persist the project manifest. Body files are written by the editor."""
+    """Persist the project manifest with backup rotation.
+
+    Write order: .tmp → rename old → .bak → rename .tmp → project.json.
+    If interrupted at any point, at least one of project.json or
+    project.json.bak will survive intact.
+    """
     bundle = Path(path) if path is not None else project.path
     if bundle is None:
         raise ValueError("No path given and project has no path set")
     ensure_bundle_layout(bundle)
     project.touch()
     manifest = bundle / PROJECT_FILE
-    tmp = manifest.with_suffix(".json.tmp")
+    backup = bundle / PROJECT_BACKUP
+    tmp = bundle / PROJECT_TMP
+    # 1. Write new manifest to a temp file.
     tmp.write_text(
         json.dumps(project.to_dict(), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    # 2. Rotate: copy current manifest to .bak before overwriting.
+    if manifest.is_file():
+        import shutil
+        shutil.copy2(manifest, backup)
+    # 3. Atomic(ish) rename of .tmp → project.json.
     tmp.replace(manifest)
     project.path = bundle
     return bundle
+
+
+def _read_manifest(bundle: Path) -> dict:
+    """Try project.json, then .bak, then .tmp. Raises FileNotFoundError."""
+    for name in (PROJECT_FILE, PROJECT_BACKUP, PROJECT_TMP):
+        candidate = bundle / name
+        if candidate.is_file():
+            try:
+                text = candidate.read_text(encoding="utf-8")
+                if text.strip():
+                    return json.loads(text)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue  # corrupt — try next fallback
+    raise FileNotFoundError(
+        f"No valid project manifest in {bundle} "
+        f"(checked {PROJECT_FILE}, {PROJECT_BACKUP}, {PROJECT_TMP})"
+    )
 
 
 def load_project(path: Path) -> Project:
     bundle = Path(path)
     if not is_skribe_bundle(bundle):
         raise FileNotFoundError(f"Not a Skribe bundle: {bundle}")
-    data = json.loads((bundle / PROJECT_FILE).read_text(encoding="utf-8"))
+    data = _read_manifest(bundle)
     return Project.from_dict(data, path=bundle)
 
 

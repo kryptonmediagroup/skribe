@@ -127,6 +127,13 @@ class MainWindow(QMainWindow):
         self._current_comments: dict[str, Comment] = {}
         self._comments_dirty = False
 
+        # Autosave: flush document body + project manifest every 60 seconds
+        # when there are unsaved changes.
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(60_000)
+        self._autosave_timer.timeout.connect(self._autosave)
+        self._autosave_timer.start()
+
         self._view_mode = str(self._settings.get(Keys.VIEW_MODE) or VIEW_EDITOR)
         if self._view_mode not in (VIEW_EDITOR, VIEW_CORKBOARD, VIEW_OUTLINER):
             self._view_mode = VIEW_EDITOR
@@ -698,6 +705,19 @@ class MainWindow(QMainWindow):
             return
         self._notify_save_success("Save", "Project saved.")
         self.statusBar().showMessage("Saved", 2000)
+
+    def _autosave(self) -> None:
+        """Periodic save when there are unsaved changes."""
+        if self._project is None or self._project.path is None:
+            return
+        if not (self._dirty_editor or self._comments_dirty):
+            return
+        self._flush_current_editor()
+        try:
+            save_project(self._project)
+            self._persist_ui_state()
+        except Exception:  # noqa: BLE001
+            pass  # autosave failures are silent — manual save will report
 
     def _action_save_as(self) -> None:
         """Save the open project under a new name as a plain file operation.
