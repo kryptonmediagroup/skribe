@@ -40,7 +40,6 @@ class CompileResult:
     """What the dialog hands back to the caller on Accept."""
     fmt: str
     options: CompileOptions
-    persist_includes: dict[str, bool]   # {uuid: include_in_compile} — to write back
 
 
 class CompileDialog(QDialog):
@@ -130,7 +129,7 @@ class CompileDialog(QDialog):
         Returns None if no items are checked — caller should treat this
         as a no-op rather than running an empty compile.
         """
-        ordered_items, persist = self._collect_checked_items()
+        ordered_items = self._collect_checked_items()
         if not ordered_items:
             return None
         front = FrontMatter(
@@ -147,7 +146,6 @@ class CompileDialog(QDialog):
         return CompileResult(
             fmt=self.chosen_format(),
             options=opts,
-            persist_includes=persist,
         )
 
     # --- internals ---------------------------------------------------
@@ -156,8 +154,9 @@ class CompileDialog(QDialog):
         """Build a tree mirroring the Manuscript subtree.
 
         Each row stores its BinderItem in ``UserRole``. Checkboxes
-        default to the item's current ``include_in_compile`` flag (true
-        when missing — same convention as :func:`stats.compiled_items`).
+        default to checked so every item is included by default;
+        unchecking an item excludes it from this compile only — it does
+        not alter the project's ``include_in_compile`` metadata.
         """
         draft = self._project.root_draft()
         if draft is None:
@@ -167,40 +166,31 @@ class CompileDialog(QDialog):
         self._tree.expandAll()
 
     def _make_row(self, item: BinderItem) -> QTreeWidgetItem:
-        included = bool(item.metadata.get("include_in_compile", True))
         type_label = "Folder" if item.type.is_container else "Section"
         row = QTreeWidgetItem([item.title or "(untitled)", type_label])
         row.setFlags(row.flags() | Qt.ItemIsUserCheckable)
-        row.setCheckState(0, Qt.Checked if included else Qt.Unchecked)
+        row.setCheckState(0, Qt.Checked)
         row.setData(0, Qt.UserRole, item.uuid)
         for child in item.children:
             row.addChild(self._make_row(child))
         return row
 
-    def _collect_checked_items(self) -> tuple[list[BinderItem], dict[str, bool]]:
-        """Walk the tree depth-first, returning checked items in order.
-
-        Also accumulates {uuid: bool} so the caller can persist any
-        toggles the user made back to the project.
-        """
+    def _collect_checked_items(self) -> list[BinderItem]:
+        """Walk the tree depth-first, returning checked items in order."""
         ordered: list[BinderItem] = []
-        persist: dict[str, bool] = {}
         for i in range(self._tree.topLevelItemCount()):
-            self._collect(self._tree.topLevelItem(i), ordered, persist)
-        return ordered, persist
+            self._collect(self._tree.topLevelItem(i), ordered)
+        return ordered
 
     def _collect(
         self,
         row: QTreeWidgetItem,
         ordered: list[BinderItem],
-        persist: dict[str, bool],
     ) -> None:
         uuid = row.data(0, Qt.UserRole)
         item = self._project.find(uuid) if isinstance(uuid, str) else None
         checked = row.checkState(0) == Qt.Checked
-        if item is not None:
-            persist[item.uuid] = checked
-            if checked:
-                ordered.append(item)
+        if item is not None and checked:
+            ordered.append(item)
         for i in range(row.childCount()):
-            self._collect(row.child(i), ordered, persist)
+            self._collect(row.child(i), ordered)

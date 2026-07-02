@@ -991,9 +991,6 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # Persist the user's Include toggles back to the project so the
-        # next compile remembers them and the inspector stays in sync.
-        self._persist_include_changes(result.persist_includes)
 
         html = build_compile_html(result.options, self._read_body_for_compile)
 
@@ -1064,30 +1061,6 @@ class MainWindow(QMainWindow):
             return
         self._notify_save_success("Compile", f"Compiled to {target.name}.")
         self.statusBar().showMessage(f"Compiled to {target.name}", 3000)
-
-    def _persist_include_changes(self, persist: dict[str, bool]) -> None:
-        """Write back any Include toggles the user changed in the dialog."""
-        if self._project is None or not persist:
-            return
-        changed = False
-        for uuid, included in persist.items():
-            item = self._project.find(uuid)
-            if item is None:
-                continue
-            current = bool(item.metadata.get("include_in_compile", True))
-            if current != included:
-                item.metadata["include_in_compile"] = included
-                item.touch()
-                changed = True
-        if changed:
-            self._project.touch()
-            try:
-                save_project(self._project)
-            except Exception:  # noqa: BLE001
-                pass
-            # Refresh the inspector if it's pointed at one of the toggled
-            # items so the checkbox reflects the new state immediately.
-            self._inspector.set_item(self._current_item)
 
     def _read_body_for_compile(self, uuid: str) -> str:
         """Body lookup for the compile pipeline.
