@@ -102,6 +102,7 @@ from skribe.ui.search_panel import (
 from skribe.ui.statistics import StatisticsDialog
 from skribe.ui.find_replace_dialog import FindReplaceDialog
 from skribe.ui.custom_fields_dialog import CustomFieldsDialog
+from skribe.ui.composition import CompositionWindow
 
 VIEW_EDITOR = "editor"
 VIEW_CORKBOARD = "corkboard"
@@ -126,6 +127,9 @@ class MainWindow(QMainWindow):
         # Comments belonging to the currently loaded document, keyed by uuid.
         self._current_comments: dict[str, Comment] = {}
         self._comments_dirty = False
+
+        # Composition mode (distraction-free fullscreen editor).
+        self._composition_window: Optional["CompositionWindow"] = None
 
         # Autosave: flush document body + project manifest every 60 seconds
         # when there are unsaved changes.
@@ -466,6 +470,12 @@ class MainWindow(QMainWindow):
                 "dictionary, then restart Skribe."
             )
         view_menu.addAction(self._act_spellcheck)
+
+        view_menu.addSeparator()
+        act_composition = QAction("Composition &Mode", self)
+        act_composition.setShortcut(QKeySequence("F11"))
+        act_composition.triggered.connect(self._toggle_composition_mode)
+        view_menu.addAction(act_composition)
 
         project_menu = mb.addMenu("&Project")
         act_add_text = QAction("Add &Text", self)
@@ -1759,6 +1769,35 @@ class MainWindow(QMainWindow):
         self._view_mode = mode
         self._settings.set(Keys.VIEW_MODE, mode)
         self._apply_view_for_current_item()
+
+    def _toggle_composition_mode(self) -> None:
+        """Enter or leave distraction-free fullscreen editing."""
+        if self._composition_window is not None and self._composition_window.isVisible():
+            # Already in composition mode — leave handled by the window itself.
+            return
+        if self._current_item is None or self._current_item.type.is_container:
+            self.statusBar().showMessage("Select a text document first.", 3000)
+            return
+        # Flush so the document is up to date.
+        self._flush_current_editor()
+        # Create the composition window on first use.
+        if self._composition_window is None:
+            self._composition_window = CompositionWindow()
+            self._composition_window.closed.connect(self._on_composition_closed)
+        # Share the editor's QTextDocument and font.
+        doc = self._editor._text.document()
+        font = self._editor._text.font()
+        self.hide()
+        self._composition_window.enter(doc, font)
+
+    def _on_composition_closed(self) -> None:
+        """Restore the main window when composition mode ends."""
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        # The document may have been edited; mark dirty so autosave picks it up.
+        self._dirty_editor = True
+        self._update_word_count()
 
     def _apply_view_for_current_item(self) -> None:
         """Pick the right stack page based on selection + view mode.
