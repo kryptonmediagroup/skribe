@@ -510,6 +510,12 @@ class EditorWidget(QWidget):
     def ruler_visible(self) -> bool:
         return not self._ruler.isHidden()
 
+    def set_format_bar_visible(self, visible: bool) -> None:
+        self._toolbar.setVisible(visible)
+
+    def format_bar_visible(self) -> bool:
+        return not self._toolbar.isHidden()
+
     def cursor_position(self) -> int:
         return self._text.textCursor().position()
 

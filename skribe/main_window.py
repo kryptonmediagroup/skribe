@@ -461,9 +461,17 @@ class MainWindow(QMainWindow):
         text_edit_menu = view_menu.addMenu("&Text Editing")
         self._act_ruler = QAction("&Ruler", self, checkable=True)
         self._act_ruler.setShortcut(QKeySequence("Alt+Shift+R"))
-        self._act_ruler.setChecked(False)
         self._act_ruler.toggled.connect(self._toggle_ruler)
         text_edit_menu.addAction(self._act_ruler)
+
+        self._act_format_bar = QAction("&Format Bar", self, checkable=True)
+        self._act_format_bar.setShortcut(QKeySequence("Alt+Shift+F"))
+        self._act_format_bar.toggled.connect(self._toggle_format_bar)
+        text_edit_menu.addAction(self._act_format_bar)
+
+        # Restore sticky visibility from settings.
+        self._act_ruler.setChecked(bool(self._settings.get(Keys.VIEW_RULER_VISIBLE)))
+        self._act_format_bar.setChecked(bool(self._settings.get(Keys.VIEW_FORMAT_BAR_VISIBLE)))
 
         self._act_spellcheck = QAction("Check &Spelling", self, checkable=True)
         self._act_spellcheck.setShortcut(QKeySequence("Ctrl+Shift+;"))
@@ -1254,6 +1262,11 @@ class MainWindow(QMainWindow):
 
     def _toggle_ruler(self, visible: bool) -> None:
         self._editor.set_ruler_visible(visible)
+        self._settings.set(Keys.VIEW_RULER_VISIBLE, visible)
+
+    def _toggle_format_bar(self, visible: bool) -> None:
+        self._editor.set_format_bar_visible(visible)
+        self._settings.set(Keys.VIEW_FORMAT_BAR_VISIBLE, visible)
 
     def _action_statistics(self) -> None:
         if self._project is None:
