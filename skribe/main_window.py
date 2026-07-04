@@ -1821,6 +1821,18 @@ class MainWindow(QMainWindow):
         # The document may have been edited; mark dirty so autosave picks it up.
         self._dirty_editor = True
         self._update_word_count()
+        # Sync ruler / format bar — the user may have toggled them in
+        # composition mode, which wrote to settings.  Re-read and apply.
+        ruler_on = bool(self._settings.get(Keys.VIEW_RULER_VISIBLE))
+        bar_on = bool(self._settings.get(Keys.VIEW_FORMAT_BAR_VISIBLE))
+        self._act_ruler.blockSignals(True)
+        self._act_ruler.setChecked(ruler_on)
+        self._act_ruler.blockSignals(False)
+        self._editor.set_ruler_visible(ruler_on)
+        self._act_format_bar.blockSignals(True)
+        self._act_format_bar.setChecked(bar_on)
+        self._act_format_bar.blockSignals(False)
+        self._editor.set_format_bar_visible(bar_on)
 
     def _apply_view_for_current_item(self) -> None:
         """Pick the right stack page based on selection + view mode.
