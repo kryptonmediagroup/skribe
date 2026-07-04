@@ -458,6 +458,13 @@ class MainWindow(QMainWindow):
         self._build_zoom_menu(view_menu)
 
         view_menu.addSeparator()
+        text_edit_menu = view_menu.addMenu("&Text Editing")
+        self._act_ruler = QAction("&Ruler", self, checkable=True)
+        self._act_ruler.setShortcut(QKeySequence("Alt+Shift+R"))
+        self._act_ruler.setChecked(False)
+        self._act_ruler.toggled.connect(self._toggle_ruler)
+        text_edit_menu.addAction(self._act_ruler)
+
         self._act_spellcheck = QAction("Check &Spelling", self, checkable=True)
         self._act_spellcheck.setShortcut(QKeySequence("Ctrl+Shift+;"))
         self._act_spellcheck.setChecked(bool(self._settings.get(Keys.SPELLCHECK_ENABLED)))
@@ -1244,6 +1251,9 @@ class MainWindow(QMainWindow):
 
     def _toggle_spellcheck(self, enabled: bool) -> None:
         self._editor.set_spellcheck_enabled(enabled)
+
+    def _toggle_ruler(self, visible: bool) -> None:
+        self._editor.set_ruler_visible(visible)
 
     def _action_statistics(self) -> None:
         if self._project is None:

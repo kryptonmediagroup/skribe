@@ -408,10 +408,16 @@ class EditorWidget(QWidget):
         self._toolbar = self._build_toolbar()
         self._footer = self._build_footer()
 
+        from skribe.ui.ruler import RulerWidget
+        self._ruler = RulerWidget(self)
+        self._ruler.attach(self._text)
+        self._ruler.hide()  # hidden by default; toggled via View menu
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._toolbar)
+        layout.addWidget(self._ruler)
         layout.addWidget(self._text)
         layout.addWidget(self._footer)
 
@@ -420,6 +426,7 @@ class EditorWidget(QWidget):
         self.zoom_changed.connect(self._refresh_zoom_widget)
         self._text.cursorPositionChanged.connect(self._emit_comment_at_cursor)
         self._text.selectionChanged.connect(self.selection_changed.emit)
+        self._text.cursorPositionChanged.connect(self._sync_ruler)
 
         self.clear()
 
@@ -494,6 +501,14 @@ class EditorWidget(QWidget):
 
     def set_focus(self) -> None:
         self._text.setFocus()
+
+    def set_ruler_visible(self, visible: bool) -> None:
+        self._ruler.setVisible(visible)
+        if visible:
+            self._sync_ruler()
+
+    def ruler_visible(self) -> bool:
+        return not self._ruler.isHidden()
 
     def cursor_position(self) -> int:
         return self._text.textCursor().position()
@@ -1184,3 +1199,13 @@ class EditorWidget(QWidget):
         self._heading_combo.blockSignals(True)
         self._heading_combo.setCurrentIndex(min(level, len(HEADING_CHOICES) - 1))
         self._heading_combo.blockSignals(False)
+
+    def _sync_ruler(self) -> None:
+        """Update the ruler's indent marker from the current block format."""
+        if not self._ruler.isVisible():
+            return
+        block_fmt = self._text.textCursor().blockFormat()
+        self._ruler.set_block_indent(
+            block_fmt.textIndent(),
+            block_fmt.leftMargin(),
+        )
