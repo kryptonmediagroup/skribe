@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 
 from skribe.settings import Keys, app_settings
 from skribe.ui.ruler import RulerWidget
+from skribe.ui.editor import HEADING_CHOICES
 
 # Surround / page colors for the dark composition environment.
 _SURROUND_COLOR = "#1a1a1a"
@@ -102,8 +103,9 @@ class CompositionWindow(QWidget):
         QShortcut(QKeySequence("Alt+Shift+F"), self, self._toggle_format_bar)
         QShortcut(QKeySequence("Alt+Shift+R"), self, self._toggle_ruler)
 
-        # Sync ruler indent when cursor moves.
+        # Sync ruler indent and toolbar state when cursor moves.
         self._text.cursorPositionChanged.connect(self._sync_ruler)
+        self._text.cursorPositionChanged.connect(self._sync_toolbar_state)
 
     # --- public API --------------------------------------------------
 
@@ -167,7 +169,29 @@ class CompositionWindow(QWidget):
         tb.setStyleSheet(
             f"QToolBar {{ background: {_TOOLBAR_BG}; border: none; }}"
             f"QToolBar QToolButton {{ color: {_TOOLBAR_TEXT}; }}"
+            f"QToolBar QComboBox {{ color: {_TOOLBAR_TEXT}; background: {_TOOLBAR_BG}; }}"
+            f"QToolBar QSpinBox {{ color: {_TOOLBAR_TEXT}; background: {_TOOLBAR_BG}; }}"
         )
+
+        self._heading_combo = QComboBox(tb)
+        for label, _ in HEADING_CHOICES:
+            self._heading_combo.addItem(label)
+        self._heading_combo.currentIndexChanged.connect(self._on_heading_changed)
+        tb.addWidget(self._heading_combo)
+        tb.addSeparator()
+
+        self._font_combo = QFontComboBox(tb)
+        self._font_combo.setMinimumContentsLength(14)
+        self._font_combo.currentFontChanged.connect(self._on_font_family_changed)
+        tb.addWidget(self._font_combo)
+
+        self._size_spin = QSpinBox(tb)
+        self._size_spin.setRange(6, 72)
+        self._size_spin.setValue(int(self._settings.get(Keys.EDITOR_FONT_SIZE)))
+        self._size_spin.valueChanged.connect(self._on_font_size_changed)
+        tb.addWidget(self._size_spin)
+
+        tb.addSeparator()
 
         self._act_bold = QAction("B", tb)
         self._act_bold.setCheckable(True)
@@ -245,6 +269,51 @@ class CompositionWindow(QWidget):
         self._act_bold.setChecked(font.weight() >= QFont.Bold)
         self._act_italic.setChecked(font.italic())
         self._act_underline.setChecked(font.underline())
+
+        self._font_combo.blockSignals(True)
+        self._size_spin.blockSignals(True)
+        fam = font.family()
+        if fam:
+            self._font_combo.setCurrentFont(QFont(fam))
+        size = font.pointSizeF() if font.pointSizeF() > 0 else float(font.pointSize())
+        if size > 0:
+            self._size_spin.setValue(max(1, round(size)))
+        self._font_combo.blockSignals(False)
+        self._size_spin.blockSignals(False)
+
+        level = self._text.textCursor().blockFormat().headingLevel()
+        self._heading_combo.blockSignals(True)
+        self._heading_combo.setCurrentIndex(min(level, len(HEADING_CHOICES) - 1))
+        self._heading_combo.blockSignals(False)
+
+    def _on_heading_changed(self, idx: int) -> None:
+        _, level = HEADING_CHOICES[idx]
+        cursor = self._text.textCursor()
+        block_fmt = cursor.blockFormat()
+        char_fmt = QTextCharFormat()
+        base = float(self._settings.get(Keys.EDITOR_FONT_SIZE))
+        if level == 0:
+            block_fmt.setHeadingLevel(0)
+            char_fmt.setFontWeight(QFont.Normal)
+            char_fmt.setFontPointSize(base)
+        else:
+            block_fmt.setHeadingLevel(level)
+            block_fmt.setTextIndent(0.0)
+            char_fmt.setFontWeight(QFont.Bold)
+            char_fmt.setFontPointSize(base + (6 - level * 2))
+        cursor.setBlockFormat(block_fmt)
+        cursor.select(QTextCursor.BlockUnderCursor)
+        cursor.mergeCharFormat(char_fmt)
+
+    def _on_font_family_changed(self, font: QFont) -> None:
+        fmt = QTextCharFormat()
+        fmt.setFontFamilies([font.family()])
+        self._merge_char_format(fmt)
+
+    def _on_font_size_changed(self, size: int) -> None:
+        fmt = QTextCharFormat()
+        fmt.setFontPointSize(float(size))
+        self._merge_char_format(fmt)
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_F11:
