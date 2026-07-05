@@ -65,6 +65,7 @@ from skribe.ioformat.compile_export import (
 )
 from skribe.ioformat.scriv_export import ScrivExportError, export_scriv
 from skribe.ioformat.skribe_io import (
+    delete_document_body,
     is_skribe_bundle,
     read_comments,
     read_document_body,
@@ -275,6 +276,7 @@ class MainWindow(QMainWindow):
         self._binder_view.add_requested.connect(self._on_add_requested)
         self._binder_view.delete_requested.connect(self._on_delete_requested)
         self._binder_view.print_requested.connect(self._action_print)
+        self._binder_view.empty_trash_requested.connect(self._action_empty_trash)
         self._editor.contents_changed.connect(self._on_editor_changed)
         self._editor.selection_changed.connect(self._update_word_count)
         self._editor.comment_anchor_requested.connect(self._on_comment_anchor_requested)
@@ -505,6 +507,11 @@ class MainWindow(QMainWindow):
         act_stats = QAction("&Statistics…", self)
         act_stats.triggered.connect(self._action_statistics)
         project_menu.addAction(act_stats)
+
+        project_menu.addSeparator()
+        act_empty_trash = QAction("&Empty Trash", self)
+        act_empty_trash.triggered.connect(self._action_empty_trash)
+        project_menu.addAction(act_empty_trash)
 
         tools_menu = mb.addMenu("&Tools")
         act_smart_quotes = QAction("Convert Straight Quotes to Smart…", self)
@@ -2121,6 +2128,53 @@ class MainWindow(QMainWindow):
             self._editor.clear()
             self._inspector.set_item(None)
         self._model.remove_item(index)
+
+    def _action_empty_trash(self) -> None:
+        """Permanently delete all items in the Trash folder."""
+        if self._project is None:
+            return
+        trash = self._project.root_trash()
+        if trash is None or not trash.children:
+            self.statusBar().showMessage("Trash is already empty.", 2000)
+            return
+        count = sum(1 for _ in trash.walk()) - 1  # exclude the folder itself
+        reply = QMessageBox.question(
+            self,
+            "Empty Trash",
+            f"Permanently delete {count} item{'s' if count != 1 else ''} "
+            f"from the Trash?\n\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        # If the currently loaded document lives in the trash, unload it.
+        if self._current_item is not None:
+            for item in trash.walk():
+                if item is self._current_item:
+                    self._current_item = None
+                    self._editor.clear()
+                    self._inspector.set_item(None)
+                    break
+        # Collect UUIDs of every descendant for disk cleanup.
+        uuids = [item.uuid for item in trash.walk() if item is not trash]
+        # Remove rows from the model (children of trash).
+        trash_idx = self._model.index_for_item(trash)
+        while self._model.rowCount(trash_idx) > 0:
+            child_idx = self._model.index(0, 0, trash_idx)
+            self._model.remove_item(child_idx)
+        # Delete document directories on disk.
+        if self._project.path is not None:
+            for uuid in uuids:
+                delete_document_body(self._project.path, uuid)
+        self._project.touch()
+        try:
+            save_project(self._project)
+        except Exception:  # noqa: BLE001
+            pass
+        self.statusBar().showMessage(
+            f"Emptied trash ({count} item{'s' if count != 1 else ''} deleted).", 3000
+        )
 
     # --- window state / close handling -------------------------------
 

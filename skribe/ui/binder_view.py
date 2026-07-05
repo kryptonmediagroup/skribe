@@ -14,6 +14,7 @@ from skribe.model.project import BinderItem, ItemType
 class BinderView(QTreeView):
     add_requested = Signal(QModelIndex, ItemType)
     delete_requested = Signal(QModelIndex)
+    empty_trash_requested = Signal()
     print_requested = Signal()
 
     def __init__(self, parent=None):
@@ -76,6 +77,13 @@ class BinderView(QTreeView):
         menu.addAction(act_delete)
 
         menu.addSeparator()
+
+        # Empty Trash — only shown when right-clicking the Trash folder.
+        if item is not None and item.type is ItemType.TRASH_FOLDER and item.children:
+            act_empty_trash = QAction("Empty Trash", self)
+            act_empty_trash.triggered.connect(self.empty_trash_requested.emit)
+            menu.addAction(act_empty_trash)
+            menu.addSeparator()
 
         act_print = QAction("Print", self)
         act_print.setEnabled(item is not None)
