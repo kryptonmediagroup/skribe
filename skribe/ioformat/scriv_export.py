@@ -49,11 +49,21 @@ class ScrivExportError(Exception):
 
 
 # --- type / date mapping -------------------------------------------------
-
+# Scrivener's Fiction template recognizes Characters/Places/Front Matter/
+# Notes/Template Sheets folders by their title rather than by a dedicated
+# Type attribute — the canonical .scrivx files we've inspected emit plain
+# Type="Folder" for those containers and let Scrivener apply the
+# special-folder icon at load time. Routing our root-container types
+# through "Folder" preserves that behavior on a Skribe→.scriv round trip.
 _TYPE_TO_SCRIV = {
     ItemType.DRAFT_FOLDER: "DraftFolder",
     ItemType.RESEARCH_FOLDER: "ResearchFolder",
     ItemType.TRASH_FOLDER: "TrashFolder",
+    ItemType.CHARACTERS_FOLDER: "Folder",
+    ItemType.PLACES_FOLDER: "Folder",
+    ItemType.FRONT_MATTER_FOLDER: "Folder",
+    ItemType.NOTES_FOLDER: "Folder",
+    ItemType.TEMPLATE_SHEETS_FOLDER: "Folder",
     ItemType.FOLDER: "Folder",
     ItemType.TEXT: "Text",
 }
@@ -150,7 +160,16 @@ def _build_collections() -> etree._Element:
 
 # --- Binder XML builder --------------------------------------------------
 
-_NO_TEXT_SETTINGS = {ItemType.DRAFT_FOLDER, ItemType.RESEARCH_FOLDER, ItemType.TRASH_FOLDER}
+_NO_TEXT_SETTINGS = {
+    ItemType.DRAFT_FOLDER,
+    ItemType.RESEARCH_FOLDER,
+    ItemType.TRASH_FOLDER,
+    ItemType.CHARACTERS_FOLDER,
+    ItemType.PLACES_FOLDER,
+    ItemType.FRONT_MATTER_FOLDER,
+    ItemType.NOTES_FOLDER,
+    ItemType.TEMPLATE_SHEETS_FOLDER,
+}
 
 
 def _build_metadata_element(meta: dict) -> Optional[etree._Element]:

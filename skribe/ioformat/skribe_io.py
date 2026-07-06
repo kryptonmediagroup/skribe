@@ -14,6 +14,7 @@ Bundle layout::
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -129,6 +130,26 @@ def write_document_body(bundle: Path, uuid: str, html: str) -> None:
     tmp = body.with_suffix(".html.tmp")
     tmp.write_text(html, encoding="utf-8")
     tmp.replace(body)
+
+def copy_document_body(bundle: Path, src_uuid: str, dst_uuid: str) -> None:
+    """Copy a document's on-disk artifacts (body + comments) under a new UUID.
+
+    Used by the binder's "Copy To" action: after the model has cloned a
+    BinderItem subtree with fresh UUIDs, every TEXT node in the clone needs
+    its body file relocated to the new UUID so the editor can load it.
+    Missing source files are silently ignored — a brand-new document that
+    was never saved has nothing to copy.
+    """
+    src_body = document_body_path(bundle, src_uuid)
+    dst_body = document_body_path(bundle, dst_uuid)
+    if src_body.is_file():
+        dst_body.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_body, dst_body)
+    src_comments = comments_path(bundle, src_uuid)
+    dst_comments = comments_path(bundle, dst_uuid)
+    if src_comments.is_file():
+        dst_comments.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_comments, dst_comments)
 
 
 def comments_path(bundle: Path, uuid: str) -> Path:

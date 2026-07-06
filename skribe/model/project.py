@@ -26,6 +26,11 @@ class ItemType(str, Enum):
     DRAFT_FOLDER = "draft_folder"      # the Manuscript root
     RESEARCH_FOLDER = "research_folder"
     TRASH_FOLDER = "trash_folder"
+    CHARACTERS_FOLDER = "characters_folder"
+    PLACES_FOLDER = "places_folder"
+    FRONT_MATTER_FOLDER = "front_matter_folder"
+    NOTES_FOLDER = "notes_folder"
+    TEMPLATE_SHEETS_FOLDER = "template_sheets_folder"
     FOLDER = "folder"
     TEXT = "text"
 
@@ -35,6 +40,11 @@ class ItemType(str, Enum):
             ItemType.DRAFT_FOLDER,
             ItemType.RESEARCH_FOLDER,
             ItemType.TRASH_FOLDER,
+            ItemType.CHARACTERS_FOLDER,
+            ItemType.PLACES_FOLDER,
+            ItemType.FRONT_MATTER_FOLDER,
+            ItemType.NOTES_FOLDER,
+            ItemType.TEMPLATE_SHEETS_FOLDER,
             ItemType.FOLDER,
         }
 
@@ -44,6 +54,11 @@ class ItemType(str, Enum):
             ItemType.DRAFT_FOLDER,
             ItemType.RESEARCH_FOLDER,
             ItemType.TRASH_FOLDER,
+            ItemType.CHARACTERS_FOLDER,
+            ItemType.PLACES_FOLDER,
+            ItemType.FRONT_MATTER_FOLDER,
+            ItemType.NOTES_FOLDER,
+            ItemType.TEMPLATE_SHEETS_FOLDER,
         }
 
 
@@ -238,12 +253,29 @@ class Project:
 
     @classmethod
     def new(cls, name: str = "Untitled") -> "Project":
-        """Create a project with the standard three root containers."""
+        """Create a project with the standard root containers.
+
+        Mirrors the Fiction-style Scrivener template: Manuscript, Characters,
+        Places, Front Matter, Notes, Research, Template Sheets, and Trash.
+        These titles match the ones Scrivener uses in its Fiction template,
+        so an export-to-Scriv round-trip leaves the special-folder icons
+        intact without our having to remember non-standard XML type names.
+        """
         project = cls(name=name)
         manuscript = BinderItem(type=ItemType.DRAFT_FOLDER, title="Manuscript")
+        characters = BinderItem(type=ItemType.CHARACTERS_FOLDER, title="Characters")
+        places = BinderItem(type=ItemType.PLACES_FOLDER, title="Places")
+        front_matter = BinderItem(type=ItemType.FRONT_MATTER_FOLDER, title="Front Matter")
+        notes = BinderItem(type=ItemType.NOTES_FOLDER, title="Notes")
         research = BinderItem(type=ItemType.RESEARCH_FOLDER, title="Research")
+        template_sheets = BinderItem(
+            type=ItemType.TEMPLATE_SHEETS_FOLDER, title="Template Sheets",
+        )
         trash = BinderItem(type=ItemType.TRASH_FOLDER, title="Trash")
-        project.roots = [manuscript, research, trash]
+        project.roots = [
+            manuscript, characters, places, front_matter, notes,
+            research, template_sheets, trash,
+        ]
         return project
 
     def touch(self) -> None:

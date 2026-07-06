@@ -16,6 +16,8 @@ class BinderView(QTreeView):
     delete_requested = Signal(QModelIndex)
     empty_trash_requested = Signal()
     print_requested = Signal()
+    move_to_requested = Signal(QModelIndex, BinderItem)
+    copy_to_requested = Signal(QModelIndex, BinderItem)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -70,6 +72,7 @@ class BinderView(QTreeView):
         act_rename.triggered.connect(lambda: self.edit(index))
         menu.addAction(act_rename)
 
+        item = model.item_from_index(index)
         # Items already in the Trash get a "Delete" option (permanent).
         # Everything else gets "Move to Trash".
         in_trash = False
@@ -94,6 +97,27 @@ class BinderView(QTreeView):
 
         menu.addSeparator()
 
+        # "Move To" / "Copy To" submenus. Each root container becomes a
+        # clickable destination and a submenu of its container descendants.
+        # The source item and any of its descendants are skipped so a move
+        # can't create a cycle. Trash stays in the list even for non-trash
+        # items — "Move to Trash" up above is just a shortcut for the
+        # common case; users can also reach it through this submenu.
+        if item is not None and not item.type.is_root_container:
+            move_menu = menu.addMenu("Move To")
+            self.populate_destination_menu(
+                move_menu,
+                item,
+                lambda dest, idx=index: self.move_to_requested.emit(idx, dest),
+            )
+            copy_menu = menu.addMenu("Copy To")
+            self.populate_destination_menu(
+                copy_menu,
+                item,
+                lambda dest, idx=index: self.copy_to_requested.emit(idx, dest),
+            )
+            menu.addSeparator()
+
         # Empty Trash — only shown when right-clicking the Trash folder.
         if item is not None and item.type is ItemType.TRASH_FOLDER and item.children:
             act_empty_trash = QAction("Empty Trash", self)
@@ -102,11 +126,83 @@ class BinderView(QTreeView):
             menu.addSeparator()
 
         act_print = QAction("Print", self)
-        act_print.setEnabled(item is not None)
-        act_print.triggered.connect(self.print_requested)
-        menu.addAction(act_print)
+    def populate_destination_menu(
+        self,
+        parent_menu: QMenu,
+        source_item: BinderItem,
+        pick_callback,
+    ) -> None:
+        """Populate the top-level "Move To" / "Copy To" submenu.
 
-        menu.exec(self.viewport().mapToGlobal(pos))
+        Every root container (Manuscript, Research, Trash) becomes a
+        nested submenu of valid destinations rooted at that container.
+        When the user picks a leaf, ``pick_callback`` is invoked with
+        the chosen ``BinderItem`` as its single argument — making this
+        helper usable from both this view's own context menu (which
+        re-emits as a Qt signal) and from sibling views like the
+        corkboard and outliner that resolve destinations inline.
+        """
+        model = self.binder_model()
+        if model is None:
+            return
+        any_destination = False
+        for root in model.root_containers():
+            sub = parent_menu.addMenu(root.title or "(untitled)")
+            if self._fill_destination_menu(
+                sub, root, source_item, pick_callback,
+            ):
+                any_destination = True
+            else:
+                parent_menu.removeAction(sub.menuAction())
+        if not any_destination:
+            placeholder = parent_menu.addAction("(no destinations)")
+            placeholder.setEnabled(False)
+
+    def _fill_destination_menu(
+        self,
+        menu: QMenu,
+        container: BinderItem,
+        source_item: BinderItem,
+        pick_callback,
+    ) -> bool:
+        """Recursively fill ``menu`` with destinations rooted at ``container``.
+
+        The container itself is exposed as a clickable action (unless it
+        would create a cycle by being the source or an ancestor of it).
+        Its container descendants become nested submenus, recursively.
+        Returns True when at least one destination was added so callers
+        can prune empty submenus.
+        """
+        model = self.binder_model()
+        if model is None:
+            return False
+        any_added = False
+        # The container itself is a valid destination if it isn't the
+        # source or any ancestor of the source. ``_is_descendant(src,
+        # candidate)`` answers "is ``candidate`` a descendant of ``src``",
+        # so we want the inverse plus the self-check.
+        is_self = container is source_item
+        is_descendant_of_source = model._is_descendant(source_item, container)
+        if not is_self and not is_descendant_of_source:
+            label = container.title or "(untitled)"
+            act = menu.addAction(label)
+            act.triggered.connect(
+                lambda _checked=False, d=container: pick_callback(d)
+            )
+            any_added = True
+        # Descend into container children that are themselves containers.
+        for child in container.children:
+            if not child.type.is_container or child is source_item:
+                continue
+            sub = menu.addMenu(child.title or "(untitled)")
+            if self._fill_destination_menu(
+                sub, child, source_item, pick_callback,
+            ):
+                any_added = True
+            else:
+                menu.removeAction(sub.menuAction())
+        return any_added
+
 
     def _confirm_delete(self, index: QModelIndex) -> None:
         model = self.binder_model()

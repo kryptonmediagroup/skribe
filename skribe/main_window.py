@@ -65,6 +65,7 @@ from skribe.ioformat.compile_export import (
 )
 from skribe.ioformat.scriv_export import ScrivExportError, export_scriv
 from skribe.ioformat.skribe_io import (
+    copy_document_body,
     delete_document_body,
     is_skribe_bundle,
     read_comments,
@@ -277,6 +278,8 @@ class MainWindow(QMainWindow):
         self._binder_view.delete_requested.connect(self._on_delete_requested)
         self._binder_view.print_requested.connect(self._action_print)
         self._binder_view.empty_trash_requested.connect(self._action_empty_trash)
+        self._binder_view.move_to_requested.connect(self._on_binder_move_to)
+        self._binder_view.copy_to_requested.connect(self._on_binder_copy_to)
         self._editor.contents_changed.connect(self._on_editor_changed)
         self._editor.selection_changed.connect(self._update_word_count)
         self._editor.comment_anchor_requested.connect(self._on_comment_anchor_requested)
@@ -493,6 +496,15 @@ class MainWindow(QMainWindow):
         act_composition.setShortcut(QKeySequence("F11"))
         act_composition.triggered.connect(self._toggle_composition_mode)
         view_menu.addAction(act_composition)
+        documents_menu = mb.addMenu("&Documents")
+        # Move To / Copy To submenus are rebuilt on demand — their contents
+        # depend on which binder item is selected, which can change between
+        # menu open events. ``aboutToShow`` fires just before the submenu
+        # drops down, which is the natural place to re-enumerate.
+        self._move_to_menu = documents_menu.addMenu("&Move To")
+        self._move_to_menu.aboutToShow.connect(self._rebuild_move_to_menu)
+        self._copy_to_menu = documents_menu.addMenu("&Copy To")
+        self._copy_to_menu.aboutToShow.connect(self._rebuild_copy_to_menu)
 
         project_menu = mb.addMenu("&Project")
         act_add_text = QAction("Add &Text", self)
@@ -2192,6 +2204,128 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Emptied trash ({count} item{'s' if count != 1 else ''} deleted).", 3000
         )
+
+    # --- move to / copy to -------------------------------------------
+
+    def _rebuild_move_to_menu(self) -> None:
+        """Repopulate the main-menu ``Move To`` submenu before it opens.
+
+        The destinations depend on which binder item is selected — picking a
+        new selection and reopening the menu should give a fresh tree.
+        """
+        self._rebuild_destination_menu(self._move_to_menu, is_move=True)
+
+    def _rebuild_copy_to_menu(self) -> None:
+        """Repopulate the main-menu ``Copy To`` submenu before it opens."""
+        self._rebuild_destination_menu(self._copy_to_menu, is_move=False)
+
+    def _rebuild_destination_menu(self, menu: QMenu, *, is_move: bool) -> None:
+        menu.clear()
+        sources = [
+            s for s in self._selected_binder_items()
+            if not s.type.is_root_container
+        ]
+        if not sources:
+            placeholder = menu.addAction("(no item selected)")
+            placeholder.setEnabled(False)
+            return
+        # Destination enumeration is driven by a single "representative"
+        # source. The cycle check uses this to skip the source and its
+        # descendants — for a multi-select operation every destination is
+        # therefore valid for every source, except where one source is an
+        # ancestor of another (rare, and caught at action time).
+        representative = sources[0]
+        self._binder_view.populate_destination_menu(
+            menu,
+            representative,
+            lambda dest, m=is_move: self._apply_move_or_copy_to(dest, m),
+        )
+
+    def _on_binder_move_to(self, index: QModelIndex, dest: BinderItem) -> None:
+        """Binder context-menu ``Move To`` landed here; defer to the shared handler."""
+        item = self._model.item_from_index(index)
+        if item is None:
+            return
+        self._move_item_to(item, dest)
+
+    def _on_binder_copy_to(self, index: QModelIndex, dest: BinderItem) -> None:
+        """Binder context-menu ``Copy To`` landed here; defer to the shared handler."""
+        item = self._model.item_from_index(index)
+        if item is None:
+            return
+        self._copy_item_to(item, dest)
+
+    def _apply_move_or_copy_to(self, dest: BinderItem, is_move: bool) -> None:
+        """Main-menu callback: move/copy every currently-selected binder item."""
+        sources = [
+            s for s in self._selected_binder_items()
+            if not s.type.is_root_container
+        ]
+        if not sources:
+            return
+        moved = 0
+        copied = 0
+        for source in sources:
+            # Don't accidentally bury one selected item inside another that
+            # would be moved/copied alongside it. Walk the rest of the
+            # selection first so the ancestry check sees the pre-move tree.
+            others = [s for s in sources if s is not source]
+            if any(self._model._is_descendant(s, dest) for s in others):
+                continue  # destination is itself being relocated; skip
+            if is_move:
+                if self._move_item_to(source, dest):
+                    moved += 1
+            else:
+                if self._copy_item_to(source, dest):
+                    copied += 1
+        verb = "Moved" if is_move else "Copied"
+        count = moved if is_move else copied
+        if count:
+            self.statusBar().showMessage(
+                f"{verb} {count} item{'s' if count != 1 else ''} "
+                f"to '{dest.title or '(untitled)'}'.", 3000
+            )
+
+    def _move_item_to(self, source: BinderItem, dest: BinderItem) -> bool:
+        """Move ``source`` under ``dest`` and persist the change."""
+        if self._project is None:
+            return False
+        if not self._model.move_item_to(source, dest):
+            return False
+        # The editor can keep showing the moved document — it's the same
+        # BinderItem, just under a different parent — so don't clear the
+        # UI the way the "Move to Trash" path does.
+        self._project.touch()
+        try:
+            save_project(self._project)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+    def _copy_item_to(self, source: BinderItem, dest: BinderItem) -> bool:
+        """Clone ``source`` under ``dest`` and copy on-disk bodies for TEXT nodes."""
+        if self._project is None:
+            return False
+        new_index, uuid_map = self._model.copy_item_to(source, dest)
+        if not new_index.isValid():
+            return False
+        # Each TEXT node in the cloned subtree gets its body file
+        # (and comments file) duplicated under the new UUID so the
+        # editor can load the copy without writing anything first.
+        if self._project.path is not None:
+            bundle = self._project.path
+            for old_uuid, new_uuid in uuid_map.items():
+                copy_document_body(bundle, old_uuid, new_uuid)
+        # Drop focus on the source so the user sees the clone as the new
+        # selection; otherwise the binder still highlights the original.
+        self._binder_view.setCurrentIndex(new_index)
+        self._project.touch()
+        try:
+            save_project(self._project)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
 
     # --- window state / close handling -------------------------------
 

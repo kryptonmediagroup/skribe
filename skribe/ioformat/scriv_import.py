@@ -33,11 +33,31 @@ _TYPE_MAP = {
     "Text": ItemType.TEXT,
 }
 
-
 def _map_type(scriv_type: Optional[str], has_children: bool) -> ItemType:
     if scriv_type and scriv_type in _TYPE_MAP:
         return _TYPE_MAP[scriv_type]
     return ItemType.FOLDER if has_children else ItemType.TEXT
+
+
+# Scrivener's Fiction template doesn't tag Characters/Places/Front Matter/
+# Notes/Template Sheets with a dedicated Type attribute — it leaves them as
+# Type="Folder" and lets the title carry the meaning. Match titles
+# case-insensitively so we round-trip the special-folder icon when users
+# rename (e.g. "characters") and still recover the canonical type on import.
+_TITLE_TO_TYPE = {
+    "characters": ItemType.CHARACTERS_FOLDER,
+    "places": ItemType.PLACES_FOLDER,
+    "front matter": ItemType.FRONT_MATTER_FOLDER,
+    "notes": ItemType.NOTES_FOLDER,
+    "template sheets": ItemType.TEMPLATE_SHEETS_FOLDER,
+}
+
+def _classify_root_container(title: str, fallback: ItemType) -> ItemType:
+    """Promote a plain FOLDER to a special root-container type by title."""
+    if fallback is not ItemType.FOLDER:
+        return fallback
+    return _TITLE_TO_TYPE.get(title.strip().lower(), fallback)
+
 
 
 def _scriv_color_to_hex(color_str: str) -> str:
@@ -194,6 +214,10 @@ def _convert_binder_item(
     child_elements = list(children_el) if children_el is not None else []
     has_children = len(child_elements) > 0
     item_type = _map_type(scriv_type, has_children)
+    # Root containers in Scrivener come across as plain Type="Folder" with a
+    # well-known title — promote them so the binder shows the right icon
+    # and round-trip exports don't lose the special-folder status.
+    item_type = _classify_root_container(title, item_type)
 
     meta = _parse_metadata(el.find("MetaData"))
     synopsis = _read_synopsis(scriv_path, uuid) if uuid else ""

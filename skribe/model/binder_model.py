@@ -42,10 +42,14 @@ class BinderModel(QAbstractItemModel):
             ItemType.DRAFT_FOLDER: style.standardIcon(QStyle.SP_DirIcon),
             ItemType.RESEARCH_FOLDER: style.standardIcon(QStyle.SP_DirLinkIcon),
             ItemType.TRASH_FOLDER: style.standardIcon(QStyle.SP_TrashIcon),
+            ItemType.CHARACTERS_FOLDER: style.standardIcon(QStyle.SP_DirIcon),
+            ItemType.PLACES_FOLDER: style.standardIcon(QStyle.SP_DirIcon),
+            ItemType.FRONT_MATTER_FOLDER: style.standardIcon(QStyle.SP_DirIcon),
+            ItemType.NOTES_FOLDER: style.standardIcon(QStyle.SP_DirIcon),
+            ItemType.TEMPLATE_SHEETS_FOLDER: style.standardIcon(QStyle.SP_DirIcon),
             ItemType.FOLDER: style.standardIcon(QStyle.SP_DirIcon),
             ItemType.TEXT: style.standardIcon(QStyle.SP_FileIcon),
         }
-
     # --- project lifecycle ---
 
     def project(self) -> Project:
@@ -373,6 +377,86 @@ class BinderModel(QAbstractItemModel):
         self.endRemoveRows()
         self._project.touch()
         return True
+
+    # --- move / copy --------------------------------------------------
+
+    def root_containers(self) -> list[BinderItem]:
+        """Return the project's top-level containers (Manuscript, Research, Trash)."""
+        return list(self._project.roots)
+
+    def move_item_to(self, source: BinderItem, dest: BinderItem) -> bool:
+        """Relocate ``source`` to the end of ``dest``. No-op if invalid."""
+        if source.type.is_root_container or dest is source:
+            return False
+        if self._is_descendant(source, dest):
+            return False  # would create a cycle
+        return self._move_item(source, dest, len(dest.children))
+
+    def copy_item_to(
+        self,
+        source: BinderItem,
+        dest: BinderItem,
+    ) -> tuple[QModelIndex, dict[str, str]]:
+        """Deep-clone ``source`` under ``dest`` and return (new_index, uuid_map).
+
+        The ``uuid_map`` maps every original UUID in the cloned subtree to the
+        fresh UUID it was given, so callers can migrate per-document on-disk
+        artifacts (body HTML, comments JSON) onto the cloned TEXT nodes.
+        Returns an invalid index and an empty map when ``source`` is a root
+        container or the clone target is invalid.
+        """
+        if (
+            source.type.is_root_container
+            or dest is source
+            or self._is_descendant(source, dest)
+            or not dest.type.is_container
+        ):
+            return QModelIndex(), {}
+        uuid_map: dict[str, str] = {}
+        clone = self._clone_subtree(source, uuid_map)
+        parent_index = self.index_for_item(dest)
+        row = len(dest.children)
+        self.beginInsertRows(parent_index, row, row)
+        dest.add_child(clone, index=row)
+        self.endInsertRows()
+        self._project.touch()
+        return self.createIndex(row, 0, clone), uuid_map
+
+    @staticmethod
+    def _clone_subtree(source: BinderItem, uuid_map: dict[str, str]) -> BinderItem:
+        """Build a fresh BinderItem mirroring ``source`` and recurse into children.
+
+        Each invocation mints a new UUID via the dataclass default factory; the
+        original->new mapping is recorded so the caller can relocate any
+        on-disk artifacts (document bodies, comment files) keyed by UUID.
+        """
+        clone = BinderItem(
+            type=source.type,
+            title=source.title,
+            synopsis=source.synopsis,
+        )
+        uuid_map[source.uuid] = clone.uuid
+        clone.metadata = {
+            k: BinderModel._clone_value(v) for k, v in source.metadata.items()
+        }
+        for child in source.children:
+            child_clone = BinderModel._clone_subtree(child, uuid_map)
+            child_clone.parent = clone
+            clone.children.append(child_clone)
+        return clone
+
+    @staticmethod
+    def _clone_value(value):
+        """Deep-copy a metadata value (dict/list/scalar) for a cloned item."""
+        if isinstance(value, dict):
+            return {k: BinderModel._clone_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [BinderModel._clone_value(v) for v in value]
+        if isinstance(value, (str, int, float, bool, type(None))):
+            return value
+        # Unknown/immutable-enough types pass through as-is.
+        return value
+
 
 
 def _default_title(item_type: ItemType) -> str:
