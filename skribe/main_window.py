@@ -79,7 +79,7 @@ from skribe.model.binder_model import BinderModel
 from skribe.model.comment import Comment
 from skribe.model.project import BinderItem, ItemType, Project
 from skribe.settings import Keys, app_settings, derive_initials
-from skribe.stats import compiled_items
+from skribe.stats import compiled_items, compute_stats
 from skribe.themes import theme_for
 from skribe.ui.binder_view import BinderView
 from skribe.ui.comments_panel import CommentsPanel
@@ -274,6 +274,11 @@ class MainWindow(QMainWindow):
 
     def _wire_signals(self) -> None:
         self._binder_view.selectionModel().currentChanged.connect(self._on_binder_selection)
+        # Multi-selection changes don't move the "current" index, so also
+        # refresh the summed word count whenever the selection set changes.
+        self._binder_view.selectionModel().selectionChanged.connect(
+            lambda *_: self._update_word_count()
+        )
         self._binder_view.add_requested.connect(self._on_add_requested)
         self._binder_view.delete_requested.connect(self._on_delete_requested)
         self._binder_view.print_requested.connect(self._action_print)
@@ -2120,15 +2125,50 @@ class MainWindow(QMainWindow):
             pass
 
     def _update_word_count(self) -> None:
-        if self._current_item is None or self._current_item.type.is_container:
+        items = self._selected_binder_items()
+        # A single open text document keeps the live, editor-based count —
+        # including the in-editor text-selection sub-count.
+        if (
+            len(items) <= 1
+            and self._current_item is not None
+            and not self._current_item.type.is_container
+        ):
+            total = self._editor.word_count()
+            if self._editor.has_selection():
+                selected = self._editor.selection_word_count()
+                self._word_count_label.setText(
+                    f"Selected: {selected} words (of {total})"
+                )
+            else:
+                self._word_count_label.setText(f"{total} words")
+            return
+        # Nothing selected → blank. Otherwise show the summed word count of
+        # the whole selection; folders contribute their descendant documents.
+        if not items:
             self._word_count_label.setText("")
             return
-        total = self._editor.word_count()
-        if self._editor.has_selection():
-            selected = self._editor.selection_word_count()
-            self._word_count_label.setText(f"Selected: {selected} words (of {total})")
-        else:
-            self._word_count_label.setText(f"{total} words")
+        total = self._selection_word_count(items)
+        self._word_count_label.setText(f"{total} words")
+
+    def _selection_word_count(self, items: list[BinderItem]) -> int:
+        """Total words across ``items`` and their descendants (folders
+        contribute the words of every text document beneath them). The
+        currently-open document is counted from the live editor so unsaved
+        edits are reflected; every other document is read from disk."""
+        bundle = self._project.path if self._project else None
+        cur = self._current_item
+
+        def _read_body(uuid: str) -> Optional[str]:
+            if cur is not None and uuid == cur.uuid and not cur.type.is_container:
+                return self._editor.html()
+            if bundle is None:
+                return None
+            try:
+                return read_document_body(bundle, uuid)
+            except Exception:
+                return None
+
+        return compute_stats(items, _read_body).words
 
     # --- add/delete ---------------------------------------------------
 
