@@ -70,11 +70,27 @@ class BinderView(QTreeView):
         act_rename.triggered.connect(lambda: self.edit(index))
         menu.addAction(act_rename)
 
-        act_delete = QAction("Delete", self)
-        item = model.item_from_index(index)
-        act_delete.setEnabled(item is not None and not item.type.is_root_container)
-        act_delete.triggered.connect(lambda: self._confirm_delete(index))
-        menu.addAction(act_delete)
+        # Items already in the Trash get a "Delete" option (permanent).
+        # Everything else gets "Move to Trash".
+        in_trash = False
+        if item is not None:
+            node = item.parent
+            while node is not None:
+                if node.type is ItemType.TRASH_FOLDER:
+                    in_trash = True
+                    break
+                node = node.parent
+
+        if in_trash:
+            act_delete = QAction("Delete", self)
+            act_delete.setEnabled(item is not None and not item.type.is_root_container)
+            act_delete.triggered.connect(lambda: self._confirm_delete(index))
+            menu.addAction(act_delete)
+        else:
+            act_trash = QAction("Move to Trash", self)
+            act_trash.setEnabled(item is not None and not item.type.is_root_container)
+            act_trash.triggered.connect(lambda: self.delete_requested.emit(index))
+            menu.addAction(act_trash)
 
         menu.addSeparator()
 

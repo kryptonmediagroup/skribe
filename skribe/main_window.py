@@ -2120,14 +2120,31 @@ class MainWindow(QMainWindow):
             self._binder_view.edit(new_idx)
 
     def _on_delete_requested(self, index) -> None:
+        """Move an item to the Trash folder (or remove it if already there)."""
         item = self._model.item_from_index(index)
-        if item is None:
+        if item is None or item.type.is_root_container:
             return
         if item is self._current_item:
             self._current_item = None
             self._editor.clear()
             self._inspector.set_item(None)
-        self._model.remove_item(index)
+        # If the item is already inside the Trash, remove it permanently.
+        trash = self._project.root_trash() if self._project else None
+        in_trash = False
+        if trash is not None:
+            node = item.parent
+            while node is not None:
+                if node is trash:
+                    in_trash = True
+                    break
+                node = node.parent
+        if in_trash or trash is None:
+            self._model.remove_item(index)
+            return
+        # Move to the end of the Trash folder.
+        self._model._move_item(item, trash, len(trash.children))
+        if self._project:
+            self._project.touch()
 
     def _action_empty_trash(self) -> None:
         """Permanently delete all items in the Trash folder."""
