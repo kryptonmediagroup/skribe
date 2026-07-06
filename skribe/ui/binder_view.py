@@ -19,6 +19,9 @@ class BinderView(QTreeView):
     move_to_requested = Signal(QModelIndex, BinderItem)
     copy_to_requested = Signal(QModelIndex, BinderItem)
     open_in_editor_requested = Signal(QModelIndex)
+    # Emitted when the user presses Delete on a selected item. MainWindow
+    # verifies with the user before routing to the trash/delete logic.
+    trash_requested = Signal(QModelIndex)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,6 +55,18 @@ class BinderView(QTreeView):
         if model is None:
             return None
         return model.item_from_index(self.currentIndex())
+
+    def keyPressEvent(self, event) -> None:
+        """Delete key on a selected, non-root item begins the trash flow."""
+        if event.key() == Qt.Key_Delete:
+            index = self.currentIndex()
+            model = self.binder_model()
+            if model is not None and index.isValid():
+                item = model.item_from_index(index)
+                if item is not None and not item.type.is_root_container:
+                    self.trash_requested.emit(index)
+                    return
+        super().keyPressEvent(event)
 
     def _show_context_menu(self, pos: QPoint) -> None:
         model = self.binder_model()

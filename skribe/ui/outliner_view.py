@@ -952,6 +952,9 @@ class OutlinerView(QTreeView):
     item_activated = Signal(QModelIndex)
     context_menu_requested = Signal(QModelIndex, object)  # (proxy_index, QPoint)
     custom_fields_requested = Signal()
+    # Emitted (with the proxy index) when the user presses Delete on a
+    # selected row. MainWindow maps to source, verifies, then trashes.
+    trash_requested = Signal(QModelIndex)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1133,6 +1136,17 @@ class OutlinerView(QTreeView):
         idx = self.indexAt(pos)
         global_pos = self.viewport().mapToGlobal(pos)
         self.context_menu_requested.emit(idx, global_pos)
+
+    def keyPressEvent(self, event) -> None:
+        """Delete key on a selected, non-root row begins the trash flow."""
+        if event.key() == Qt.Key_Delete:
+            index = self.currentIndex()
+            if index.isValid():
+                item = index.internalPointer()
+                if item is not None and not item.type.is_root_container:
+                    self.trash_requested.emit(index)
+                    return
+        super().keyPressEvent(event)
 
     # -- row resize (drag row-border) ------------------------------------
 

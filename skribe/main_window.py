@@ -296,6 +296,9 @@ class MainWindow(QMainWindow):
         self._outliner.item_activated.connect(self._on_outliner_activated)
         self._outliner.context_menu_requested.connect(self._on_outliner_context_menu)
         self._outliner.custom_fields_requested.connect(self._action_custom_fields)
+        self._binder_view.trash_requested.connect(self._confirm_trash)
+        self._corkboard.trash_requested.connect(self._confirm_trash)
+        self._outliner.trash_requested.connect(self._on_outliner_trash_requested)
 
         # TTS: editor's read-selection request (from context menu)
         self._editor.read_selection_requested.connect(self._action_read_selection)
@@ -2137,6 +2140,46 @@ class MainWindow(QMainWindow):
         if new_idx.isValid():
             self._binder_view.setCurrentIndex(new_idx)
             self._binder_view.edit(new_idx)
+
+    def _on_outliner_trash_requested(self, proxy_index) -> None:
+        """Delete key in the Outliner: map the proxy row to the source index."""
+        self._confirm_trash(self._outliner_proxy.mapToSource(proxy_index))
+
+    def _confirm_trash(self, index) -> None:
+        """Verify with the user, then move the item to the Trash (or delete it
+        permanently if it already lives there). Shared by the Delete key in the
+        Binder, Outliner, and Corkboard views."""
+        item = self._model.item_from_index(index)
+        if item is None or item.type.is_root_container:
+            return
+        trash = self._project.root_trash() if self._project else None
+        in_trash = False
+        if trash is not None:
+            node = item.parent
+            while node is not None:
+                if node is trash:
+                    in_trash = True
+                    break
+                node = node.parent
+        title = item.title or "(untitled)"
+        if in_trash or trash is None:
+            caption = "Delete item"
+            text = (
+                f'Permanently delete "{title}" and all its children?\n\n'
+                "This cannot be undone."
+            )
+        else:
+            caption = "Move to Trash"
+            text = f'Move "{title}" to the Trash?'
+        reply = QMessageBox.question(
+            self,
+            caption,
+            text,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self._on_delete_requested(index)
 
     def _on_delete_requested(self, index) -> None:
         """Move an item to the Trash folder (or remove it if already there)."""

@@ -218,6 +218,9 @@ class CorkboardView(QListView):
 
     card_activated = Signal(QModelIndex)
     context_menu_requested = Signal(QModelIndex, QPoint)
+    # Emitted when the user presses Delete on the selected card. MainWindow
+    # verifies with the user before routing to the trash/delete logic.
+    trash_requested = Signal(QModelIndex)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -285,3 +288,15 @@ class CorkboardView(QListView):
         idx = self.indexAt(pos)
         global_pos = self.viewport().mapToGlobal(pos)
         self.context_menu_requested.emit(idx, global_pos)
+
+    def keyPressEvent(self, event) -> None:
+        """Delete key on the selected card begins the trash flow."""
+        if event.key() == Qt.Key_Delete:
+            index = self.currentIndex()
+            model = self.model()
+            if model is not None and index.isValid():
+                item = model.item_from_index(index)
+                if item is not None and not item.type.is_root_container:
+                    self.trash_requested.emit(index)
+                    return
+        super().keyPressEvent(event)
