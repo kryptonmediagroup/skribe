@@ -126,6 +126,12 @@ class BinderView(QTreeView):
             menu.addSeparator()
 
         act_print = QAction("Print", self)
+        act_print.setEnabled(item is not None)
+        act_print.triggered.connect(self.print_requested)
+        menu.addAction(act_print)
+
+        menu.exec(self.viewport().mapToGlobal(pos))
+
     def populate_destination_menu(
         self,
         parent_menu: QMenu,
