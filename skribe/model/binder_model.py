@@ -325,27 +325,41 @@ class BinderModel(QAbstractItemModel):
 
     # --- structural edits ---
 
-    def add_item(self, parent_index: QModelIndex, item_type: ItemType, title: str = "") -> QModelIndex:
-        if parent_index.isValid():
-            parent_item: BinderItem = parent_index.internalPointer()
+    def add_item(self, anchor_index: QModelIndex, item_type: ItemType, title: str = "") -> QModelIndex:
+        """Create a new item relative to the ``anchor_index`` selection.
+
+        - A leaf (text) anchor: insert as a sibling immediately below it.
+        - A container (folder) anchor: append to the bottom of that folder.
+        - No anchor (nothing selected): append to the bottom of the default
+          draft folder (the current top-level container).
+        """
+        if anchor_index.isValid():
+            anchor_item: BinderItem = anchor_index.internalPointer()
+            if anchor_item.type.is_container:
+                # Folder selected: append to the bottom of that folder.
+                parent_item = anchor_item
+                parent_index = anchor_index
+                row = len(parent_item.children)
+            else:
+                # Text selected: insert immediately below it, as a sibling.
+                parent_item = anchor_item.parent
+                if parent_item is None:
+                    return QModelIndex()
+                parent_index = self.index_for_item(parent_item)
+                row = parent_item.children.index(anchor_item) + 1
         else:
-            # default: first draft folder
-            parent_item = self._project.root_draft() or (self._project.roots[0] if self._project.roots else None)
+            # Nothing selected: append to the bottom of the default folder.
+            parent_item = self._project.root_draft() or (
+                self._project.roots[0] if self._project.roots else None
+            )
             if parent_item is None:
                 return QModelIndex()
             parent_index = self.index_for_item(parent_item)
-        if not parent_item.type.is_container:
-            # promote: add as sibling under the item's parent
-            actual_parent = parent_item.parent
-            if actual_parent is None:
-                return QModelIndex()
-            parent_item = actual_parent
-            parent_index = self.index_for_item(actual_parent)
+            row = len(parent_item.children)
 
-        row = len(parent_item.children)
         new_item = BinderItem(type=item_type, title=title or _default_title(item_type))
         self.beginInsertRows(parent_index, row, row)
-        parent_item.add_child(new_item)
+        parent_item.add_child(new_item, index=row)
         self.endInsertRows()
         self._project.touch()
         return self.createIndex(row, 0, new_item)
