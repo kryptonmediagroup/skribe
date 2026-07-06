@@ -18,6 +18,7 @@ class BinderView(QTreeView):
     print_requested = Signal()
     move_to_requested = Signal(QModelIndex, BinderItem)
     copy_to_requested = Signal(QModelIndex, BinderItem)
+    open_in_editor_requested = Signal(QModelIndex)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -124,6 +125,18 @@ class BinderView(QTreeView):
             act_empty_trash.triggered.connect(self.empty_trash_requested.emit)
             menu.addAction(act_empty_trash)
             menu.addSeparator()
+
+        # "Open" submenu — the only entry today is "In Editor", which lets
+        # the user pull a trashed text item back onto the editing surface
+        # without restoring it. Force-enabled whenever there's a valid
+        # selection; the handler in MainWindow decides whether the item
+        # actually has a body to display.
+        if index.isValid() and item is not None and not item.type.is_root_container:
+            open_menu = menu.addMenu("Open")
+            act_open_editor = open_menu.addAction("In Editor")
+            act_open_editor.triggered.connect(
+                lambda: self.open_in_editor_requested.emit(index)
+            )
 
         act_print = QAction("Print", self)
         act_print.setEnabled(item is not None)

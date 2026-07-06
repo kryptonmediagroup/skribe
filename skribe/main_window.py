@@ -280,6 +280,7 @@ class MainWindow(QMainWindow):
         self._binder_view.empty_trash_requested.connect(self._action_empty_trash)
         self._binder_view.move_to_requested.connect(self._on_binder_move_to)
         self._binder_view.copy_to_requested.connect(self._on_binder_copy_to)
+        self._binder_view.open_in_editor_requested.connect(self._on_open_in_editor)
         self._editor.contents_changed.connect(self._on_editor_changed)
         self._editor.selection_changed.connect(self._update_word_count)
         self._editor.comment_anchor_requested.connect(self._on_comment_anchor_requested)
@@ -2254,6 +2255,23 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         self._copy_item_to(item, dest)
+
+    def _on_open_in_editor(self, index: QModelIndex) -> None:
+        """Binder context-menu ``Open → In Editor`` landed here.
+
+        Sets the binder selection so the editor loads the item's body,
+        then forces the editor page onto the center stack — this is the
+        difference between this and a plain selection click: a user in
+        the corkboard or outliner view can still surface the editor for
+        a specific item (notably trashed text, which has no other path
+        to the editing surface).
+        """
+        if not index.isValid():
+            return
+        self._binder_view.setCurrentIndex(index)
+        self._center_stack.setCurrentWidget(self._editor)
+        self._editor.set_focus()
+
 
     def _apply_move_or_copy_to(self, dest: BinderItem, is_move: bool) -> None:
         """Main-menu callback: move/copy every currently-selected binder item."""
