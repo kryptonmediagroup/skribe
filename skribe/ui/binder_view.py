@@ -23,7 +23,9 @@ class BinderView(QTreeView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setHeaderHidden(False)
-        self.setEditTriggers(QTreeView.EditKeyPressed | QTreeView.SelectedClicked)
+        self.setEditTriggers(
+            QTreeView.DoubleClicked | QTreeView.EditKeyPressed | QTreeView.SelectedClicked
+        )
         self.setSelectionBehavior(QTreeView.SelectRows)
         # Extended selection: Shift-click for ranges, Ctrl/Cmd-click to
         # toggle individual rows. The editor still tracks one "current"
