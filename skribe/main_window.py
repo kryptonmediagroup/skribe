@@ -1898,8 +1898,9 @@ class MainWindow(QMainWindow):
 
         if index.isValid():
             menu.addSeparator()
-            act_open = menu.addAction("Open")
-            act_open.triggered.connect(lambda: self._on_corkboard_activated(index))
+            open_menu = menu.addMenu("Open")
+            act_open_editor = open_menu.addAction("In Editor")
+            act_open_editor.triggered.connect(lambda: self._on_open_in_editor(index))
             act_reveal = menu.addAction("Reveal in Binder")
             act_reveal.triggered.connect(lambda: self._corkboard_reveal_in_binder(index))
 
@@ -1953,8 +1954,13 @@ class MainWindow(QMainWindow):
 
         if proxy_index.isValid():
             menu.addSeparator()
-            act_open = menu.addAction("Open")
-            act_open.triggered.connect(lambda: self._on_outliner_activated(proxy_index))
+            open_menu = menu.addMenu("Open")
+            act_open_editor = open_menu.addAction("In Editor")
+            act_open_editor.triggered.connect(
+                lambda: self._on_open_in_editor(
+                    self._outliner_proxy.mapToSource(proxy_index)
+                )
+            )
             act_reveal = menu.addAction("Reveal in Binder")
             act_reveal.triggered.connect(lambda: self._outliner_reveal_in_binder(proxy_index))
 
