@@ -2444,18 +2444,32 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, event) -> None:
-        # Stop any in-flight text-to-speech first. If the worker QThread is
-        # still running when the window (and its only reference) is torn
-        # down, Qt aborts the process with "QThread: Destroyed while thread
-        # is still running". _stop_tts requests a stop and waits for it.
-        self._stop_tts()
         self._flush_current_editor()
         if self._project is not None:
             try:
                 save_project(self._project)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Warning)
+                box.setWindowTitle("Save Failed")
+                box.setText("Failed to save your project before quitting.")
+                box.setInformativeText(
+                    f"{exc}\n\nUnsaved changes will be lost if you quit now."
+                )
+                quit_btn = box.addButton("Quit Anyway", QMessageBox.DestructiveRole)
+                cancel_btn = box.addButton("Cancel", QMessageBox.RejectRole)
+                box.setDefaultButton(cancel_btn)
+                box.exec()
+                if box.clickedButton() is not quit_btn:
+                    event.ignore()
+                    return
             self._persist_ui_state()
+        # Stop any in-flight text-to-speech. If the worker QThread is still
+        # running when the window (and its only reference) is torn down, Qt
+        # aborts the process with "QThread: Destroyed while thread is still
+        # running". _stop_tts requests a stop and waits for it. Deferred until
+        # after the save-failure prompt so a cancelled close leaves TTS alone.
+        self._stop_tts()
         self._save_window_state()
         super().closeEvent(event)
 
