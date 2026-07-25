@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -75,7 +76,6 @@ class CompileDialog(QDialog):
         scope_row.addWidget(QLabel("Compile group:"))
         scope_row.addWidget(QLabel("Manuscript"))
         scope_row.addStretch(1)
-
         # --- Item tree --------------------------------------------------
         self._tree = QTreeWidget(self)
         self._tree.setHeaderLabels(["Title", "Type"])
@@ -83,6 +83,19 @@ class CompileDialog(QDialog):
         self._tree.setUniformRowHeights(True)
         self._tree.setColumnWidth(0, 380)
         self._populate_tree()
+        # Cascade check-state changes from a folder down to its children.
+        self._tree.itemChanged.connect(self._on_item_changed)
+
+        # Select All / Select None buttons next to the tree.
+        sel_row = QHBoxLayout()
+        sel_row.addWidget(QLabel("Items to include:"))
+        sel_row.addStretch(1)
+        self._btn_select_all = QPushButton("Select All", self)
+        self._btn_select_all.clicked.connect(lambda: self._set_all(Qt.Checked))
+        sel_row.addWidget(self._btn_select_all)
+        self._btn_select_none = QPushButton("Select None", self)
+        self._btn_select_none.clicked.connect(lambda: self._set_all(Qt.Unchecked))
+        sel_row.addWidget(self._btn_select_none)
 
         # --- Front matter ----------------------------------------------
         self._front_group = QGroupBox("Add front matter (title page)", self)
@@ -113,7 +126,7 @@ class CompileDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addLayout(format_row)
         layout.addLayout(scope_row)
-        layout.addWidget(QLabel("Items to include:"))
+        layout.addLayout(sel_row)
         layout.addWidget(self._tree, 1)
         layout.addWidget(self._front_group)
         layout.addWidget(buttons)
@@ -194,3 +207,25 @@ class CompileDialog(QDialog):
             ordered.append(item)
         for i in range(row.childCount()):
             self._collect(row.child(i), ordered)
+
+    def _set_all(self, state: Qt.CheckState) -> None:
+        """Check or uncheck every row in the tree."""
+        self._tree.blockSignals(True)
+        for i in range(self._tree.topLevelItemCount()):
+            self._apply_state(self._tree.topLevelItem(i), state)
+        self._tree.blockSignals(False)
+
+    def _apply_state(self, row: QTreeWidgetItem, state: Qt.CheckState) -> None:
+        row.setCheckState(0, state)
+        for i in range(row.childCount()):
+            self._apply_state(row.child(i), state)
+
+    def _on_item_changed(self, row: QTreeWidgetItem, column: int) -> None:
+        """Cascade a folder's check state down to all its descendants."""
+        if column != 0:
+            return
+        state = row.checkState(0)
+        self._tree.blockSignals(True)
+        for i in range(row.childCount()):
+            self._apply_state(row.child(i), state)
+        self._tree.blockSignals(False)
