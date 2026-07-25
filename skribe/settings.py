@@ -59,9 +59,13 @@ class Keys:
     VIEW_RULER_VISIBLE = "view/ruler_visible"
     VIEW_FORMAT_BAR_VISIBLE = "view/format_bar_visible"
 
-    # Window
-    MAIN_GEOMETRY = "mainwindow/geometry"
-    MAIN_STATE = "mainwindow/state"
+    # Compile dialog — last-used settings, applied on next open.
+    COMPILE_FORMAT = "compile/format"
+    COMPILE_INCLUDED_UUIDS = "compile/included_uuids"
+    COMPILE_FRONT_ENABLED = "compile/front_enabled"
+    COMPILE_FRONT_TITLE = "compile/front_title"
+    COMPILE_FRONT_SUBTITLE = "compile/front_subtitle"
+    COMPILE_FRONT_AUTHOR = "compile/front_author"
 
 
 # --- Defaults -------------------------------------------------------------
@@ -88,16 +92,21 @@ DEFAULTS: dict[str, Any] = {
     Keys.SPELLCHECK_ENABLED: True,
     Keys.SPELLCHECK_LANGUAGE: "en_US",
 
-    # Must match skribe.tts.DEFAULT_VOICE.
-    Keys.TTS_VOICE: "expr-voice-2-f",
-    Keys.TTS_SPEED: 1.0,
-    Keys.HF_TOKEN: "",
-
     Keys.VIEW_MODE: "editor",
     Keys.VIEW_ZOOM_PERCENT: 100,
     Keys.VIEW_RULER_VISIBLE: False,
     Keys.VIEW_FORMAT_BAR_VISIBLE: True,
+
+    # Compile dialog defaults — empty values mean "fall back to built-in
+    # defaults" (no prior session, or items missing from the project).
+    Keys.COMPILE_FORMAT: "",
+    Keys.COMPILE_INCLUDED_UUIDS: [],
+    Keys.COMPILE_FRONT_ENABLED: False,
+    Keys.COMPILE_FRONT_TITLE: "",
+    Keys.COMPILE_FRONT_SUBTITLE: "",
+    Keys.COMPILE_FRONT_AUTHOR: "",
 }
+
 
 
 def derive_initials(name: str) -> str:

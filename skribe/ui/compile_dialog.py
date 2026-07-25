@@ -34,6 +34,7 @@ from skribe.ioformat.compile_export import (
     supported_formats,
 )
 from skribe.model.project import BinderItem, ItemType, Project
+from skribe.settings import Keys, app_settings
 
 
 @dataclass
@@ -113,6 +114,9 @@ class CompileDialog(QDialog):
         front_form.addRow("Author:", self._author_edit)
         self._front_group.setLayout(front_form)
 
+        # Reapply the previous session's selections once all widgets exist.
+        self._load_state()
+
         # --- Buttons ----------------------------------------------------
         buttons = QDialogButtonBox(
             QDialogButtonBox.Cancel,
@@ -132,6 +136,11 @@ class CompileDialog(QDialog):
         layout.addWidget(buttons)
 
     # --- public API -------------------------------------------------
+
+    def accept(self) -> None:
+        """Persist the user's choices before closing the dialog."""
+        self._save_state()
+        super().accept()
 
     def chosen_format(self) -> str:
         return self._format_combo.currentText()
@@ -229,3 +238,69 @@ class CompileDialog(QDialog):
         for i in range(row.childCount()):
             self._apply_state(row.child(i), state)
         self._tree.blockSignals(False)
+
+    # --- session persistence ----------------------------------------
+
+    def _load_state(self) -> None:
+        """Reapply the previous session's selections, if any.
+
+        Falls back to the built-in defaults (every item checked, no
+        front matter) when no prior session exists. Items that no
+        longer exist in the project are silently ignored.
+        """
+        s = app_settings()
+        # Format — only restore if the saved value is still valid.
+        saved_fmt = str(s.get(Keys.COMPILE_FORMAT) or "")
+        if saved_fmt:
+            idx = self._format_combo.findText(saved_fmt)
+            if idx >= 0:
+                self._format_combo.setCurrentIndex(idx)
+
+        # Checked items — restore by uuid, default to checked if no
+        # prior selection was saved.
+        saved_uuids = s.get(Keys.COMPILE_INCLUDED_UUIDS) or []
+        if saved_uuids:
+            wanted = {str(u) for u in saved_uuids if u}
+            self._tree.blockSignals(True)
+            for i in range(self._tree.topLevelItemCount()):
+                self._restore_check(self._tree.topLevelItem(i), wanted)
+            self._tree.blockSignals(False)
+
+        # Front matter fields.
+        self._front_group.setChecked(bool(s.get(Keys.COMPILE_FRONT_ENABLED)))
+        self._title_edit.setText(str(s.get(Keys.COMPILE_FRONT_TITLE) or ""))
+        self._subtitle_edit.setText(str(s.get(Keys.COMPILE_FRONT_SUBTITLE) or ""))
+        self._author_edit.setText(str(s.get(Keys.COMPILE_FRONT_AUTHOR) or ""))
+
+    def _restore_check(self, row: QTreeWidgetItem, wanted: set[str]) -> None:
+        uuid = row.data(0, Qt.UserRole)
+        if isinstance(uuid, str):
+            row.setCheckState(0, Qt.Checked if uuid in wanted else Qt.Unchecked)
+        for i in range(row.childCount()):
+            self._restore_check(row.child(i), wanted)
+
+    def _save_state(self) -> None:
+        """Persist the current selections for the next dialog open."""
+        s = app_settings()
+        s.set(Keys.COMPILE_FORMAT, self._format_combo.currentText())
+        uuids: list[str] = []
+        for i in range(self._tree.topLevelItemCount()):
+            self._collect_checked_uuids(self._tree.topLevelItem(i), uuids)
+        s.set(Keys.COMPILE_INCLUDED_UUIDS, uuids)
+        s.set(Keys.COMPILE_FRONT_ENABLED, self._front_group.isChecked())
+        s.set(Keys.COMPILE_FRONT_TITLE, self._title_edit.text())
+        s.set(Keys.COMPILE_FRONT_SUBTITLE, self._subtitle_edit.text())
+        s.set(Keys.COMPILE_FRONT_AUTHOR, self._author_edit.text())
+        s.sync()
+
+    def _collect_checked_uuids(
+        self,
+        row: QTreeWidgetItem,
+        out: list[str],
+    ) -> None:
+        if row.checkState(0) == Qt.Checked:
+            uuid = row.data(0, Qt.UserRole)
+            if isinstance(uuid, str):
+                out.append(uuid)
+        for i in range(row.childCount()):
+            self._collect_checked_uuids(row.child(i), out)
