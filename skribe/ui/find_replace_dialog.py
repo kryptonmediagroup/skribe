@@ -25,6 +25,7 @@ class FindReplaceState:
     replace_text: str
     search_project: bool
     whole_word: bool = False
+    case_sensitive: bool = False
     current_index: int = 0
     total_matches: int = 0
 
@@ -32,15 +33,15 @@ class FindReplaceState:
 class FindReplaceDialog(QDialog):
     """Modal find/replace dialog with navigation and scope options."""
 
-    find_next = Signal(str, bool, bool)  # find_text, search_forward, whole_word
-    replace_one = Signal(str, str, bool)  # find_text, replace_text, whole_word
-    replace_all = Signal(str, str, bool, bool)  # find_text, replace_text, search_project, whole_word
-    navigate_to_doc = Signal(str)  # uuid of document to navigate to
+    find_next = Signal(str, bool, bool, bool)  # find_text, forward, whole_word, case_sensitive
+    replace_one = Signal(str, str, bool, bool)  # find_text, replace_text, whole_word, case_sensitive
+    replace_all = Signal(str, str, bool, bool, bool)  # find_text, replace_text, search_project, whole_word, case_sensitive
+    navigate_to_doc = Signal(str, bool, bool)  # uuid, whole_word, case_sensitive
 
     def __init__(
         self,
         get_current_text: Callable[[], str],
-        search_project: Callable[[str, bool], list[tuple[str, str, int]]],
+        search_project: Callable[[str, bool, bool], list[tuple[str, str, int]]],
         parent=None,
     ):
         super().__init__(parent)
@@ -67,6 +68,9 @@ class FindReplaceDialog(QDialog):
         self._whole_word_check = QCheckBox("Match whole words", self)
         self._whole_word_check.stateChanged.connect(self._on_whole_word_changed)
 
+        self._case_check = QCheckBox("Match case", self)
+        self._case_check.stateChanged.connect(self._on_case_changed)
+
         self._status_label = QLabel("", self)
         self._status_label.setStyleSheet("color: gray;")
 
@@ -89,20 +93,26 @@ class FindReplaceDialog(QDialog):
         action_layout.addWidget(self._btn_replace)
         action_layout.addWidget(self._btn_replace_all)
 
+        flags_layout = QHBoxLayout()
+        flags_layout.addWidget(self._whole_word_check)
+        flags_layout.addWidget(self._case_check)
+        flags_layout.addStretch(1)
+
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(QLabel("Find:"))
         main_layout.addWidget(self._find_edit)
         main_layout.addWidget(QLabel("Replace with:"))
         main_layout.addWidget(self._replace_edit)
         main_layout.addWidget(self._project_check)
-        main_layout.addWidget(self._whole_word_check)
+        main_layout.addLayout(flags_layout)
         main_layout.addWidget(self._status_label)
         main_layout.addLayout(nav_layout)
         main_layout.addLayout(action_layout)
         main_layout.addWidget(self._btn_close)
 
-        self._find_edit.installEventFilter(self)
-        self._replace_edit.installEventFilter(self)
+    def _on_find_text_changed(self, text: str) -> None:
+        self._state.find_text = text
+        self._perform_search()
 
     def eventFilter(self, obj, event):
         if event.type() == 6:  # KeyPress
@@ -127,15 +137,26 @@ class FindReplaceDialog(QDialog):
         self._state.whole_word = self._whole_word_check.isChecked()
         self._perform_search()
 
+    def _on_case_changed(self, _state: int) -> None:
+        self._state.case_sensitive = self._case_check.isChecked()
+        self._perform_search()
+
     def _perform_search(self) -> None:
         find_text = self._find_edit.text()
         if not find_text:
             self._status_label.setText("")
+            self._matches = []
+            self._state.total_matches = 0
+            self._state.current_index = 0
             self._update_button_states()
             return
 
         if self._project_check.isChecked():
-            self._matches = self._search_project(find_text, False)
+            self._matches = self._search_project(
+                find_text,
+                self._state.whole_word,
+                self._state.case_sensitive,
+            )
             self._state.total_matches = len(self._matches)
             self._state.current_index = 0
             if self._matches:
@@ -166,9 +187,13 @@ class FindReplaceDialog(QDialog):
             self._state.current_index = (self._state.current_index + 1) % len(self._matches)
             uuid, title, _ = self._matches[self._state.current_index]
             self._status_label.setText(f"{self._state.current_index + 1} of {len(self._matches)}: {title}")
-            self.navigate_to_doc.emit(uuid)
+            self.navigate_to_doc.emit(
+                uuid, self._state.whole_word, self._state.case_sensitive
+            )
         else:
-            self.find_next.emit(find_text, True, self._state.whole_word)
+            self.find_next.emit(
+                find_text, True, self._state.whole_word, self._state.case_sensitive
+            )
 
     def _on_prev(self) -> None:
         find_text = self._find_edit.text()
@@ -178,23 +203,34 @@ class FindReplaceDialog(QDialog):
             self._state.current_index = (self._state.current_index - 1) % len(self._matches)
             uuid, title, _ = self._matches[self._state.current_index]
             self._status_label.setText(f"{self._state.current_index + 1} of {len(self._matches)}: {title}")
-            self.navigate_to_doc.emit(uuid)
+            self.navigate_to_doc.emit(
+                uuid, self._state.whole_word, self._state.case_sensitive
+            )
         else:
-            self.find_next.emit(find_text, False, self._state.whole_word)
+            self.find_next.emit(
+                find_text, False, self._state.whole_word, self._state.case_sensitive
+            )
 
     def _on_replace(self) -> None:
         find_text = self._find_edit.text()
         replace_text = self._replace_edit.text()
         if not find_text:
             return
-        self.replace_one.emit(find_text, replace_text, self._state.whole_word)
+        self.replace_one.emit(
+            find_text, replace_text,
+            self._state.whole_word, self._state.case_sensitive,
+        )
 
     def _on_replace_all(self) -> None:
         find_text = self._find_edit.text()
         replace_text = self._replace_edit.text()
         if not find_text:
             return
-        self.replace_all.emit(find_text, replace_text, self._project_check.isChecked(), self._state.whole_word)
+        self.replace_all.emit(
+            find_text, replace_text,
+            self._project_check.isChecked(),
+            self._state.whole_word, self._state.case_sensitive,
+        )
 
     def update_status(self, message: str) -> None:
         self._status_label.setText(message)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1580,7 +1581,11 @@ class MainWindow(QMainWindow):
         else:
             find_text = self._find_replace_dialog._find_edit.text()
             if find_text:
-                self._on_find_next(find_text, True)
+                state = self._find_replace_dialog._state
+                self._on_find_next(
+                    find_text, True,
+                    state.whole_word, state.case_sensitive,
+                )
 
     def _action_find_prev(self) -> None:
         """Find previous occurrence (Shift+F3)."""
@@ -1589,12 +1594,27 @@ class MainWindow(QMainWindow):
         else:
             find_text = self._find_replace_dialog._find_edit.text()
             if find_text:
-                self._on_find_next(find_text, False)
+                state = self._find_replace_dialog._state
+                self._on_find_next(
+                    find_text, False,
+                    state.whole_word, state.case_sensitive,
+                )
 
-    def _search_project_for_find(self, find_text: str, _case_sensitive: bool) -> list[tuple[str, str, int]]:
+    def _search_project_for_find(
+        self,
+        find_text: str,
+        whole_word: bool,
+        case_sensitive: bool,
+    ) -> list[tuple[str, str, int]]:
         """Search all documents in the project for find_text."""
         if self._project is None:
             return []
+        if not find_text:
+            return []
+        pattern = re.compile(
+            _whole_word_pattern(find_text) if whole_word else re.escape(find_text),
+            0 if case_sensitive else re.IGNORECASE,
+        )
         hits: list[tuple[str, str, int]] = []
         for item in self._project.walk():
             if item.type.is_root_container:
@@ -1603,17 +1623,25 @@ class MainWindow(QMainWindow):
                 continue
             html = read_document_body(self._project.path, item.uuid)
             plain = plain_text_from_html(html or "")
-            if find_text.lower() in plain.lower():
-                count = plain.lower().count(find_text.lower())
-                hits.append((item.uuid, item.title or "", count))
+            matches = list(pattern.finditer(plain))
+            if matches:
+                hits.append((item.uuid, item.title or "", len(matches)))
         return hits
 
-    def _on_find_next(self, find_text: str, forward: bool, whole_word: bool = False) -> None:
+    def _on_find_next(
+        self,
+        find_text: str,
+        forward: bool,
+        whole_word: bool = False,
+        case_sensitive: bool = False,
+    ) -> None:
         """Handle Next/Back button click."""
         from PySide6.QtGui import QTextDocument
         options = QTextDocument.FindFlag(0)
         if whole_word:
             options |= QTextDocument.FindFlag.FindWholeWords
+        if case_sensitive:
+            options |= QTextDocument.FindFlag.FindCaseSensitively
         if forward:
             found = self._editor._text.find(find_text, options)
         else:
@@ -1626,7 +1654,12 @@ class MainWindow(QMainWindow):
         else:
             self._find_replace_dialog.update_status("No more matches")
 
-    def _on_find_navigate_to_doc(self, uuid: str) -> None:
+    def _on_find_navigate_to_doc(
+        self,
+        uuid: str,
+        whole_word: bool = False,
+        case_sensitive: bool = False,
+    ) -> None:
         """Navigate to a document by uuid (from project search)."""
         index = self._model.index_from_uuid(uuid)
         if not index.isValid():
@@ -1646,36 +1679,60 @@ class MainWindow(QMainWindow):
             # starts from the top of the document.
             self._editor._text.moveCursor(QTextCursor.Start)
         if find_text:
-            self._on_find_next(find_text, True)
+            self._on_find_next(find_text, True, whole_word, case_sensitive)
 
-    def _on_replace_one(self, find_text: str, replace_text: str, whole_word: bool = False) -> None:
+    def _on_replace_one(
+        self,
+        find_text: str,
+        replace_text: str,
+        whole_word: bool = False,
+        case_sensitive: bool = False,
+    ) -> None:
         """Replace the current selection if it matches."""
         cursor = self._editor._text.textCursor()
         if cursor.hasSelection():
             selected = cursor.selectedText()
-            if whole_word:
-                matches = selected.lower() == find_text.lower()
+            if case_sensitive:
+                if whole_word:
+                    matches = selected == find_text
+                else:
+                    matches = find_text in selected
             else:
-                matches = find_text.lower() in selected.lower()
+                if whole_word:
+                    matches = selected.lower() == find_text.lower()
+                else:
+                    matches = find_text.lower() in selected.lower()
             if matches:
                 cursor.insertText(replace_text)
-        self._on_find_next(find_text, True, whole_word)
+        self._on_find_next(find_text, True, whole_word, case_sensitive)
 
-    def _on_replace_all(self, find_text: str, replace_text: str, search_project: bool, whole_word: bool = False) -> None:
+    def _on_replace_all(
+        self,
+        find_text: str,
+        replace_text: str,
+        search_project: bool,
+        whole_word: bool = False,
+        case_sensitive: bool = False,
+    ) -> None:
         """Replace all occurrences."""
         if search_project:
             if self._project is None or self._project.path is None:
                 return
             self._flush_current_editor()
+            pattern = re.compile(
+                _whole_word_pattern(find_text) if whole_word else re.escape(find_text),
+                0 if case_sensitive else re.IGNORECASE,
+            )
             count = 0
             for item in self._project.walk():
                 if item.type.is_root_container:
                     continue
                 html = read_document_body(self._project.path, item.uuid)
                 plain = plain_text_from_html(html or "")
-                item_count = plain.lower().count(find_text.lower())
+                item_count = len(pattern.findall(plain))
                 if item_count > 0:
-                    new_html = html.replace(find_text, replace_text, item_count)
+                    new_plain = pattern.sub(replace_text, plain)
+                    new_html = html.replace(plain, new_plain, 1)
                     write_document_body(self._project.path, item.uuid, new_html)
                     count += item_count
             if self._current_item and self._current_item.uuid:
@@ -1686,6 +1743,8 @@ class MainWindow(QMainWindow):
             options = QTextDocument.FindFlag(0)
             if whole_word:
                 options |= QTextDocument.FindFlag.FindWholeWords
+            if case_sensitive:
+                options |= QTextDocument.FindFlag.FindCaseSensitively
             doc = self._editor._text.document()
             cursor = QTextCursor(doc)
             cursor.beginEditBlock()
@@ -2680,3 +2739,12 @@ class _TTSWorker(QThread):
                 proc.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 proc.kill()
+
+
+def _whole_word_pattern(term: str) -> str:
+    """Build a regex pattern that matches ``term`` only as a whole word.
+
+    Used by the Find/Replace dialog's project-wide search so the same
+    semantics as ``QTextDocument.FindFlag.FindWholeWords`` apply offline.
+    """
+    return r"\b" + re.escape(term) + r"\b"
