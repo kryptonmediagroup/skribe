@@ -66,6 +66,9 @@ class Keys:
     COMPILE_FRONT_TITLE = "compile/front_title"
     COMPILE_FRONT_SUBTITLE = "compile/front_subtitle"
     COMPILE_FRONT_AUTHOR = "compile/front_author"
+    # Window
+    MAIN_GEOMETRY = "mainwindow/geometry"
+    MAIN_STATE = "mainwindow/state"
 
 
 # --- Defaults -------------------------------------------------------------
@@ -91,6 +94,11 @@ DEFAULTS: dict[str, Any] = {
 
     Keys.SPELLCHECK_ENABLED: True,
     Keys.SPELLCHECK_LANGUAGE: "en_US",
+
+    # Must match skribe.tts.DEFAULT_VOICE.
+    Keys.TTS_VOICE: "expr-voice-2-f",
+    Keys.TTS_SPEED: 1.0,
+    Keys.HF_TOKEN: "",
 
     Keys.VIEW_MODE: "editor",
     Keys.VIEW_ZOOM_PERCENT: 100,
