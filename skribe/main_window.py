@@ -1629,12 +1629,24 @@ class MainWindow(QMainWindow):
     def _on_find_navigate_to_doc(self, uuid: str) -> None:
         """Navigate to a document by uuid (from project search)."""
         index = self._model.index_from_uuid(uuid)
-        if index.isValid():
+        if not index.isValid():
+            return
+        find_text = self._find_replace_dialog._find_edit.text()
+        if self._binder_view.currentIndex() == index:
+            # Already on this doc — setCurrentIndex is a no-op, so the
+            # document isn't reloaded and the cursor stays wherever the
+            # last find() left it (often past the match we want to find
+            # here). Reset to the start so the find can locate the term.
+            self._editor._text.moveCursor(QTextCursor.Start)
+        else:
             self._binder_view.setCurrentIndex(index)
             self._binder_view.scrollTo(index)
-            find_text = self._find_replace_dialog._find_edit.text()
-            if find_text:
-                self._on_find_next(find_text, True)
+            # _on_binder_selection restores the saved cursor for this
+            # doc, which may sit past the match. Reset so the find
+            # starts from the top of the document.
+            self._editor._text.moveCursor(QTextCursor.Start)
+        if find_text:
+            self._on_find_next(find_text, True)
 
     def _on_replace_one(self, find_text: str, replace_text: str, whole_word: bool = False) -> None:
         """Replace the current selection if it matches."""
@@ -1730,7 +1742,15 @@ class MainWindow(QMainWindow):
             self._binder_view.expand(parent)
             parent = parent.parent()
         self._jump_to_first_match = True
-        self._binder_view.setCurrentIndex(idx)
+        # If the target is already the current item, setCurrentIndex is a
+        # no-op and never fires currentChanged — which would skip the
+        # search-highlight refresh in _on_binder_selection. Detect that
+        # and refresh highlights explicitly.
+        cur_idx = self._binder_view.currentIndex()
+        if cur_idx == idx:
+            self._refresh_search_highlights(jump_to_first=True)
+        else:
+            self._binder_view.setCurrentIndex(idx)
 
     def _populate_search_results(self) -> None:
         if self._search_panel is None:
