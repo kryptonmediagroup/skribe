@@ -22,9 +22,20 @@ REM Python doesn't match.
 REM -- Pick a Python interpreter ----------------------------------------
 set "PY="
 
+REM Prefer a stable, released Python via the Microsoft launcher. We
+REM try known-good minor versions newest-first; PySide6 only ships
+REM wheels for released Pythons, so we must avoid pre-release builds
+REM like 3.15 that 'py -3' (highest installed) would otherwise pick.
 where py >nul 2>&1
 if not errorlevel 1 (
-    set "PY=py -3"
+    for %%V in (3.13 3.12 3.11 3.10) do (
+        if "!PY!"=="" (
+            py -%%V -c "import sys" >nul 2>nul
+            if not errorlevel 1 set "PY=py -%%V"
+        )
+    )
+    REM Last resort: whatever 'py -3' resolves to (may be pre-release).
+    if "!PY!"=="" set "PY=py -3"
     goto :py_resolved
 )
 
@@ -84,13 +95,20 @@ goto :venv_ready
 
 :venv_ready
 
-REM -- Verify venv stdlib is intact -------------------------------------
-if exist "%VENV%\Lib\encodings\__init__.py" goto :stdlib_ok
-echo Venv stdlib is missing; rebuilding.
+REM -- Verify the venv interpreter can load its stdlib ------------------
+REM A healthy Windows venv does NOT copy the stdlib into Lib\encodings;
+REM it shares the base interpreter's stdlib via pyvenv.cfg's 'home'.
+REM So the only reliable health check is to actually run the venv's
+REM python.exe and import encodings. If that fails, the base
+REM interpreter's stdlib is unreachable — rebuild once, then give up.
+"%VENV%\Scripts\python.exe" -c "import encodings" >nul 2>nul
+if not errorlevel 1 goto :stdlib_ok
+echo Venv interpreter cannot load its stdlib; rebuilding.
 rmdir /s /q "%VENV%"
 %PY% -m venv "%VENV%"
 if errorlevel 1 goto :err
-if not exist "%VENV%\Lib\encodings\__init__.py" goto :err_stdlib
+"%VENV%\Scripts\python.exe" -c "import encodings" >nul 2>nul
+if errorlevel 1 goto :err_stdlib
 
 :stdlib_ok
 
@@ -148,8 +166,9 @@ echo requirements.txt at %HERE%\requirements.txt.
 exit /b 1
 
 :err_stdlib
-echo venv creation succeeded but %VENV%\Lib\encodings is missing.
-echo The interpreter's stdlib cannot be located.  Install the official
-echo Python 3.10+ from https://www.python.org/downloads/windows/ via
-echo the .exe installer and re-run this script.
+echo The venv's python.exe cannot import its stdlib, even after a
+echo clean rebuild.  The base interpreter's stdlib is unreachable.
+echo Install the official Python 3.10+ from
+echo https://www.python.org/downloads/windows/ via the .exe installer
+echo and re-run this script.
 exit /b 1
