@@ -129,10 +129,13 @@ if errorlevel 1 goto :err
 "%VENV%\Scripts\python.exe" -m pip install -r "%HERE%\requirements.txt"
 if errorlevel 1 goto :err
 
-REM -- Isolate venv from any inherited PYTHONHOME / PYTHONPATH ---------
-REM Forces the DLL search path used by Qt's Shiboken6 to resolve against
-REM the venv's lib directory rather than the conda base.
-set "PYTHONHOME=%VENV%"
+REM -- Isolate the venv from an inherited environment ------------------
+REM Clear PYTHONHOME and PYTHONPATH that a parent shell (e.g. a conda
+REM prompt) may have set. Do NOT point PYTHONHOME at the venv: a venv
+REM shares the base interpreter's stdlib via pyvenv.cfg's 'home', so
+REM overriding PYTHONHOME to %VENV% makes Python hunt for 'encodings'
+REM in %VENV%\Lib (where it doesn't exist) and crash on startup.
+set "PYTHONHOME="
 set "PYTHONPATH="
 set "PYTHONNOUSERSITE=1"
 
