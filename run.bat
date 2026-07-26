@@ -1,6 +1,6 @@
 @echo off
 REM Launch Skribe using its dedicated venv.
-setlocal
+setlocal EnableDelayedExpansion
 
 REM Pick a Python interpreter. We avoid conda's python.exe because it
 REM drags site-packages from the conda base into any venv it creates,
@@ -42,9 +42,47 @@ if "%VENV%"=="" set "VENV=%USERPROFILE%\skribe\.venv"
 set "HERE=%~dp0"
 set "HERE=%HERE:~0,-1%"
 
-REM Create venv on first run.
-if not exist "%VENV%" (
-    echo Creating virtual environment at %VENV%...
+REM Resolve the active Python's major.minor (e.g. "3.13"). We rebuild
+REM the venv whenever it disagrees with whatever currently exists —
+REM mixing 3.13 stdlib with 3.14 wheels (or vice versa) yields a fatal
+REM "Failed to import encodings module" at the next launch.
+set "ACTIVE_PY_VERSION="
+for /f "delims=" %%v in ('%PY% -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"') do set "ACTIVE_PY_VERSION=%%v"
+
+set "VENV_PY_VERSION="
+if exist "%VENV%\pyvenv.cfg" (
+    for /f "tokens=* eol=#" %%c in ('type "%VENV%\pyvenv.cfg"') do (
+        if "!VENV_PY_VERSION!"=="" (
+            for /f "tokens=1,2 delims== " %%k in ("%%c") do (
+                if /i "%%k"=="version" set "VENV_PY_VERSION=%%l"
+            )
+        )
+    )
+)
+
+if not "!VENV_PY_VERSION!"=="" (
+    REM 'version = 3.13.5' -> keep the leading '3.13'; ignore patch.
+    for /f "tokens=1,2 delims=." %%a in ("!VENV_PY_VERSION!") do (
+        if not "!ACTIVE_PY_VERSION!"=="%%a.%%b" (
+            echo Venv was built with Python !VENV_PY_VERSION! but the active interpreter is !ACTIVE_PY_VERSION! -- recreating.
+            rmdir /s /q "%VENV%"
+        )
+    )
+)
+
+REM Create the venv if it's missing or was just wiped.
+if not exist "%VENV%\Scripts\python.exe" (
+    echo Creating virtual environment at %VENV% using Python !ACTIVE_PY_VERSION!...
+    %PY% -m venv "%VENV%"
+    if errorlevel 1 exit /b 1
+)
+
+REM Sanity-check the venv's stdlib. If its 'encodings' module is
+REM missing — e.g., because the venv dir was preserved but its
+REM stdlib wasn't — rebuild cleanly.
+if not exist "%VENV%\Lib\encodings\__init__.py" (
+    echo Venv appears incomplete (missing stdlib); recreating...
+    rmdir /s /q "%VENV%"
     %PY% -m venv "%VENV%"
     if errorlevel 1 exit /b 1
 )
