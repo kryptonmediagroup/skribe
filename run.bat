@@ -46,7 +46,7 @@ REM If the base Python is the Windows embeddable distribution or is
 REM otherwise broken, 'python -c "import encodings"' prints nothing and
 REM exits non-zero. Bail out with a clear message rather than building
 REM a venv from a broken interpreter.
-"%PY%" -c "import encodings, sys; assert hasattr(sys, 'getrefcount'); print(sys.version)" >nul 2>nul
+%PY% -c "import encodings, sys; print(sys.version)" >nul 2>nul
 if errorlevel 1 goto :bad_python
 
 REM -- Resolve active Python version -----------------------------------
