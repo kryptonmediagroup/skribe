@@ -10,9 +10,14 @@ REM   2. The Microsoft Python launcher ('py -3') resolves to the
 REM      highest registered Python. If a newer interpreter appears
 REM      after the venv was created, pip installs wheels for it that
 REM      don't match the venv's stdlib.
+REM   3. Windows "embeddable" Python distributions ship without the
+REM      full stdlib, so python -m venv creates a venv missing
+REM      Lib\encodings\__init__.py and the interpreter immediately
+REM      crashes with "Failed to import encodings module".
 REM
-REM We resolve both problems by picking a clean interpreter, then
-REM rebuilding the venv if its Python doesn't match.
+REM We resolve all three by picking a clean interpreter, verifying it
+REM can actually load its own stdlib, then rebuilding the venv if its
+REM Python doesn't match.
 
 REM -- Pick a Python interpreter ----------------------------------------
 set "PY="
@@ -35,6 +40,14 @@ if not errorlevel 1 (
 
 :py_resolved
 if "%PY%"=="" goto :no_python
+
+REM -- Verify the chosen interpreter can load its own stdlib -----------
+REM If the base Python is the Windows embeddable distribution or is
+REM otherwise broken, 'python -c "import encodings"' prints nothing and
+REM exits non-zero. Bail out with a clear message rather than building
+REM a venv from a broken interpreter.
+"%PY%" -c "import encodings, sys; assert hasattr(sys, 'getrefcount'); print(sys.version)" >nul 2>nul
+if errorlevel 1 goto :bad_python
 
 REM -- Resolve active Python version -----------------------------------
 for /f "delims=" %%v in ('%PY% -c "import sys; print(str(sys.version_info.major) + chr(46) + str(sys.version_info.minor))"') do set "ACTIVE_PY_VERSION=%%v"
@@ -117,6 +130,18 @@ echo environment with Python 3.13 first, then run this script from a
 echo regular cmd.exe window ^(not "Anaconda Prompt"^).
 exit /b 1
 
+:bad_python
+echo The Python interpreter "%PY%" resolved to is missing its stdlib.
+echo This typically means you registered the Windows "embeddable"
+echo Python distribution ^(a python.org zip download^) with the
+echo Microsoft launcher.  Embeddable distributions omit encodings and
+echo most of the stdlib, so 'python -m venv' produces a broken venv.
+echo.
+echo Install the official Python 3.10+ from
+echo https://www.python.org/downloads/windows/ via the .exe installer
+echo ^(NOT the embeddable zip package^), then re-run this script.
+exit /b 1
+
 :err
 echo pip install failed. Check your network connection and the
 echo requirements.txt at %HERE%\requirements.txt.
@@ -124,5 +149,7 @@ exit /b 1
 
 :err_stdlib
 echo venv creation succeeded but %VENV%\Lib\encodings is missing.
-echo Delete %VENV% by hand and re-run this script.
+echo The interpreter's stdlib cannot be located.  Install the official
+echo Python 3.10+ from https://www.python.org/downloads/windows/ via
+echo the .exe installer and re-run this script.
 exit /b 1
