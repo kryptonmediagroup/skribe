@@ -388,6 +388,12 @@ class MainWindow(QMainWindow):
         self._act_print = act_print
 
         file_menu.addSeparator()
+        act_options = QAction("&Options…", self)
+        act_options.setShortcut(QKeySequence("Ctrl+,"))
+        act_options.triggered.connect(self._action_preferences)
+        file_menu.addAction(act_options)
+
+        file_menu.addSeparator()
 
         act_quit = QAction("&Quit", self)
         act_quit.setShortcut(QKeySequence.Quit)
@@ -441,12 +447,6 @@ class MainWindow(QMainWindow):
         act_custom_fields = QAction("Custom &Metadata Fields…", self)
         act_custom_fields.triggered.connect(self._action_custom_fields)
         edit_menu.addAction(act_custom_fields)
-
-        edit_menu.addSeparator()
-        act_prefs = QAction("&Preferences…", self)
-        act_prefs.setShortcut(QKeySequence("Ctrl+,"))
-        act_prefs.triggered.connect(self._action_preferences)
-        edit_menu.addAction(act_prefs)
 
         view_menu = mb.addMenu("&View")
         self._view_action_group = QActionGroup(self)
