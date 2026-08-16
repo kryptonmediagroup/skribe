@@ -225,6 +225,9 @@ class PreferencesDialog(QDialog):
 
         self._backup_interval = QComboBox(w)
         self._backup_interval.addItem("None", userData=0)
+        self._backup_interval.addItem("Every minute", userData=1)
+        self._backup_interval.addItem("Every 5 minutes", userData=5)
+        self._backup_interval.addItem("Every 10 minutes", userData=10)
         self._backup_interval.addItem("Every 15 minutes", userData=15)
         self._backup_interval.addItem("Every half hour", userData=30)
         self._backup_interval.addItem("Every hour", userData=60)
