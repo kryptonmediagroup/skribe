@@ -65,6 +65,7 @@ from skribe.ioformat.compile_export import (
     write_compile,
 )
 from skribe.ioformat.scriv_export import ScrivExportError, export_scriv
+from skribe.ioformat.backup import backup_project
 from skribe.ioformat.skribe_io import (
     copy_document_body,
     delete_document_body,
@@ -140,6 +141,13 @@ class MainWindow(QMainWindow):
         self._autosave_timer.setInterval(60_000)
         self._autosave_timer.timeout.connect(self._autosave)
         self._autosave_timer.start()
+
+        # Automated backups: a separate timer whose interval comes from
+        # Preferences (0 = disabled). Armed here and re-armed whenever the
+        # backup settings change.
+        self._backup_timer = QTimer(self)
+        self._backup_timer.timeout.connect(self._run_backup)
+        self._arm_backup_timer()
 
         self._view_mode = str(self._settings.get(Keys.VIEW_MODE) or VIEW_EDITOR)
         if self._view_mode not in (VIEW_EDITOR, VIEW_CORKBOARD, VIEW_OUTLINER):
@@ -773,6 +781,40 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             pass  # autosave failures are silent — manual save will report
 
+    def _arm_backup_timer(self) -> None:
+        """(Re)configure the backup timer from the current settings.
+
+        Interval of 0 disables backups (timer stopped). Any positive
+        value is a period in minutes.
+        """
+        minutes = int(self._settings.get(Keys.BACKUP_INTERVAL_MINUTES) or 0)
+        self._backup_timer.stop()
+        if minutes > 0:
+            self._backup_timer.setInterval(minutes * 60_000)
+            self._backup_timer.start()
+
+    def _run_backup(self) -> None:
+        """Write a full backup copy of the current project to the
+        configured destination folder. Silent on success; failures land
+        in the status bar without interrupting the user."""
+        if self._project is None or self._project.path is None:
+            return
+        dest = str(self._settings.get(Keys.BACKUP_DIR) or "").strip()
+        if not dest:
+            return
+        # Persist current edits so the backup reflects on-screen state.
+        self._flush_current_editor()
+        try:
+            save_project(self._project)
+        except Exception:  # noqa: BLE001
+            pass  # a failed save shouldn't block the backup of prior state
+        try:
+            written = backup_project(self._project, Path(dest))
+        except Exception as exc:  # noqa: BLE001
+            self.statusBar().showMessage(f"Backup failed: {exc}", 5000)
+            return
+        self.statusBar().showMessage(f"Backed up to {written}", 3000)
+
     def _action_save_as(self) -> None:
         """Save the open project under a new name as a plain file operation.
 
@@ -1365,6 +1407,7 @@ class MainWindow(QMainWindow):
         self._apply_current_theme()
         self._editor.reload_settings()
         self._rebuild_recent_menu()
+        self._arm_backup_timer()
 
     # --- project lifecycle -------------------------------------------
 

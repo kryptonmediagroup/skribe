@@ -70,6 +70,10 @@ class Keys:
     MAIN_GEOMETRY = "mainwindow/geometry"
     MAIN_STATE = "mainwindow/state"
 
+    # Automated backups
+    BACKUP_DIR = "backup/destination_dir"
+    BACKUP_INTERVAL_MINUTES = "backup/interval_minutes"  # 0 = disabled
+
 
 # --- Defaults -------------------------------------------------------------
 
@@ -113,6 +117,9 @@ DEFAULTS: dict[str, Any] = {
     Keys.COMPILE_FRONT_TITLE: "",
     Keys.COMPILE_FRONT_SUBTITLE: "",
     Keys.COMPILE_FRONT_AUTHOR: "",
+
+    Keys.BACKUP_DIR: "",
+    Keys.BACKUP_INTERVAL_MINUTES: 0,
 }
 
 

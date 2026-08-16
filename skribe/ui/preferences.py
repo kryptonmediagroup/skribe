@@ -12,10 +12,13 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFontComboBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -44,6 +47,7 @@ class PreferencesDialog(QDialog):
         tabs.addTab(self._build_editor_tab(), "Editor")
         tabs.addTab(self._build_speech_tab(), "Speech")
         tabs.addTab(self._build_appearance_tab(), "Appearance")
+        tabs.addTab(self._build_backups_tab(), "Backups")
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.Apply,
@@ -201,6 +205,49 @@ class PreferencesDialog(QDialog):
         form.addRow("Color scheme:", self._theme)
         return w
 
+    def _build_backups_tab(self) -> QWidget:
+        w = QWidget(self)
+        form = QFormLayout(w)
+
+        # Destination folder: a line edit for a typed absolute path plus a
+        # Browse button. The two share one row so the field stays wide.
+        self._backup_dir = QLineEdit(w)
+        self._backup_dir.setPlaceholderText("Folder to hold backup copies")
+        browse = QPushButton("Browse…", w)
+        browse.clicked.connect(self._on_browse_backup_dir)
+        dir_row = QHBoxLayout()
+        dir_row.setContentsMargins(0, 0, 0, 0)
+        dir_row.addWidget(self._backup_dir, 1)
+        dir_row.addWidget(browse)
+        dir_holder = QWidget(w)
+        dir_holder.setLayout(dir_row)
+        form.addRow("Backup folder:", dir_holder)
+
+        self._backup_interval = QComboBox(w)
+        self._backup_interval.addItem("None", userData=0)
+        self._backup_interval.addItem("Every 15 minutes", userData=15)
+        self._backup_interval.addItem("Every half hour", userData=30)
+        self._backup_interval.addItem("Every hour", userData=60)
+        form.addRow("Backup interval:", self._backup_interval)
+
+        hint = QLabel(
+            "Each backup is a full copy of the current project, saved to the "
+            "folder above as a standard Skribe project with the same name.",
+            w,
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray;")
+        form.addRow(hint)
+        return w
+
+    def _on_browse_backup_dir(self) -> None:
+        start = self._backup_dir.text().strip() or os.path.expanduser("~")
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Choose Backup Folder", start, QFileDialog.ShowDirsOnly
+        )
+        if chosen:
+            self._backup_dir.setText(chosen)
+
     # --- load/save ---
 
     def _load_values(self) -> None:
@@ -245,6 +292,11 @@ class PreferencesDialog(QDialog):
         self._tts_speed.setValue(float(s.get(Keys.TTS_SPEED)))
         self._hf_token.setText(str(s.get(Keys.HF_TOKEN) or ""))
 
+        self._backup_dir.setText(str(s.get(Keys.BACKUP_DIR) or ""))
+        interval = int(s.get(Keys.BACKUP_INTERVAL_MINUTES) or 0)
+        bidx = self._backup_interval.findData(interval)
+        self._backup_interval.setCurrentIndex(bidx if bidx >= 0 else 0)
+
     def _apply(self) -> None:
         s = self._settings
         name = self._author_name.text().strip()
@@ -281,6 +333,9 @@ class PreferencesDialog(QDialog):
             os.environ["HF_TOKEN"] = token
         elif "HF_TOKEN" in os.environ:
             del os.environ["HF_TOKEN"]
+
+        s.set(Keys.BACKUP_DIR, self._backup_dir.text().strip())
+        s.set(Keys.BACKUP_INTERVAL_MINUTES, int(self._backup_interval.currentData() or 0))
 
         s.sync()
         self.applied.emit()
