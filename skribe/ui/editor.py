@@ -13,9 +13,10 @@ from typing import Optional
 import re
 import uuid as _uuid
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QMimeData, Signal
 from PySide6.QtGui import (
     QAction,
+    QBrush,
     QColor,
     QFont,
     QFontMetricsF,
@@ -137,8 +138,94 @@ def smartify_html(html: str) -> tuple[str, int]:
         pos += 1
     return "".join(out), count
 
+class _PasteWithoutColor:
+    """Mixin: drop text color and background color from a paste.
 
-class _Editor(QTextEdit):
+    When rich text is pasted into a ``QTextEdit``, the source's HTML can
+    carry ``color:`` and ``background-color:`` declarations along with
+    the actual text. Skribe doesn't expose a text-color picker — every
+    fragment is meant to inherit the editor's theme — so a stray color
+    from the copy buffer is never wanted.
+
+    The mixin subclasses ``insertFromMimeData`` to perform the default
+    insert, then walks every freshly-painted fragment inside the
+    inserted range and clears its foreground *and* background brushes so
+    the text falls back to the editor's default. Bold/italic/underline/
+    headings/lists and other non-color formatting are preserved. Document
+    page background is not touched — the editor's page color stays as-is.
+    """
+
+    def insertFromMimeData(self, source: QMimeData) -> None:  # type: ignore[override]
+        if not source.hasHtml() and not source.hasText():
+            return
+        cursor = self.textCursor()
+        # Anchor the position *before* the insert; the default handler
+        # moves the cursor past the inserted text on return.
+        if cursor.hasSelection():
+            start = cursor.selectionStart()
+        else:
+            start = cursor.position()
+        super().insertFromMimeData(source)
+        end = self.textCursor().position()
+        if end <= start:
+            return
+        self._strip_foreground_color(start, end)
+
+    def _strip_foreground_color(self, start: int, end: int) -> None:
+        """Reset foreground and background brushes on every fragment in ``[start, end)``."""
+        document = self.document()
+        # Collect each fragment's overlap and character format. We snapshot
+        # them first so the editing pass can't invalidate the iterator.
+        ranges: list[tuple[int, int, QTextCharFormat]] = []
+        block = document.findBlock(start)
+        end_block = document.findBlock(end)
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                f_start = frag.position()
+                f_end = f_start + frag.length()
+                if f_end <= start:
+                    it += 1
+                    continue
+                if f_start >= end:
+                    break
+                # If the fragment has any color, we will clear it; checking
+                # both foreground and background removes pasted color info
+                # while preserving bold/italic/underline/headings/etc.
+                if (frag.charFormat().foreground().style() != Qt.NoBrush or
+                        frag.charFormat().background().style() != Qt.NoBrush):
+                    o_start = max(start, f_start)
+                    o_end = min(end, f_end)
+                    if o_start < o_end:
+                        ranges.append((o_start, o_end, frag.charFormat()))
+                it += 1
+            if block == end_block:
+                break
+            block = block.next()
+        if not ranges:
+            return
+        edit_cursor = QTextCursor(document)
+        edit_cursor.beginEditBlock()
+        try:
+            for r_start, r_end, fmt in ranges:
+                cursor = QTextCursor(document)
+                cursor.setPosition(r_start)
+                cursor.setPosition(r_end, QTextCursor.KeepAnchor)
+                fmt = QTextCharFormat(fmt)
+                fmt.clearForeground()
+                fmt.clearBackground()
+                cursor.setCharFormat(fmt)
+        finally:
+            edit_cursor.endEditBlock()
+        # Park the caret at the end of the paste, matching QTextEdit's
+        # default post-paste behavior (otherwise it sits at the start).
+        cursor = self.textCursor()
+        cursor.setPosition(end)
+        self.setTextCursor(cursor)
+
+
+class _Editor(_PasteWithoutColor, QTextEdit):
     """QTextEdit subclass that belt-and-suspenders the text-indent on new blocks."""
 
     def __init__(self, owner: "EditorWidget"):
