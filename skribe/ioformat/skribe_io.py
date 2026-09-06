@@ -14,6 +14,7 @@ Bundle layout::
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -61,6 +62,44 @@ def ensure_bundle_layout(bundle: Path) -> None:
     paths["settings"].mkdir(exist_ok=True)
 
 
+def _atomic_write_text(target: Path, data: str) -> None:
+    """Write *data* atomically with fsync.
+
+    Writes to target.with_suffix(target.suffix + ".tmp") (or a .tmp next to target)
+    using a low-level file descriptor, fsyncs the data and directory, then
+    os.replace into place. The temp file lives on the same filesystem as target,
+    so the rename is atomic. Fsync reduces the chance of partially written
+    data surviving an unmount/power loss on flash media.
+    """
+    tmp = target.with_name(target.name + ".tmp")
+    # Write to a file descriptor so we can fsync reliably.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        # Ensure the directory entry is flushed too.
+        dir_fd = os.open(target.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except BaseException:
+        # Best effort cleanup on failure.
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    # Atomic rename on same filesystem.
+    os.replace(tmp, target)
+
+
 def save_project(project: Project, path: Optional[Path] = None) -> Path:
     """Persist the project manifest with backup rotation.
 
@@ -75,18 +114,13 @@ def save_project(project: Project, path: Optional[Path] = None) -> Path:
     project.touch()
     manifest = bundle / PROJECT_FILE
     backup = bundle / PROJECT_BACKUP
-    tmp = bundle / PROJECT_TMP
-    # 1. Write new manifest to a temp file.
-    tmp.write_text(
-        json.dumps(project.to_dict(), indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    # 2. Rotate: copy current manifest to .bak before overwriting.
+    # Serialize manifest.
+    data = json.dumps(project.to_dict(), indent=2, ensure_ascii=False)
+    # Rotate existing manifest to .bak before overwriting.
     if manifest.is_file():
-        import shutil
         shutil.copy2(manifest, backup)
-    # 3. Atomic(ish) rename of .tmp → project.json.
-    tmp.replace(manifest)
+    # Atomic write with fsync.
+    _atomic_write_text(manifest, data)
     project.path = bundle
     return bundle
 
@@ -127,9 +161,7 @@ def read_document_body(bundle: Path, uuid: str) -> str:
 def write_document_body(bundle: Path, uuid: str, html: str) -> None:
     body = document_body_path(bundle, uuid)
     body.parent.mkdir(parents=True, exist_ok=True)
-    tmp = body.with_suffix(".html.tmp")
-    tmp.write_text(html, encoding="utf-8")
-    tmp.replace(body)
+    _atomic_write_text(body, html)
 
 def copy_document_body(bundle: Path, src_uuid: str, dst_uuid: str) -> None:
     """Copy a document's on-disk artifacts (body + comments) under a new UUID.
@@ -183,12 +215,8 @@ def write_comments(bundle: Path, uuid: str, comments: list[Comment]) -> None:
         return
     p.parent.mkdir(parents=True, exist_ok=True)
     payload = {"version": 1, "comments": comments_to_list(comments)}
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    tmp.replace(p)
+    data = json.dumps(payload, indent=2, ensure_ascii=False)
+    _atomic_write_text(p, data)
 
 
 def delete_document_body(bundle: Path, uuid: str) -> None:
@@ -223,9 +251,5 @@ def write_ui_state(bundle: Path, state: dict) -> None:
     bundle.mkdir(parents=True, exist_ok=True)
     payload = {"version": _UI_STATE_VERSION, **state}
     p = bundle / UI_STATE_FILE
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    tmp.replace(p)
+    data = json.dumps(payload, indent=2, ensure_ascii=False)
+    _atomic_write_text(p, data)
