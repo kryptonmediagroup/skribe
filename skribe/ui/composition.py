@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 
 from skribe.settings import Keys, app_settings
 from skribe.ui.ruler import RulerWidget
-from skribe.ui.editor import HEADING_CHOICES
+from skribe.ui.editor import HEADING_CHOICES, _PasteWithoutColor
 
 # Surround / page colors for the dark composition environment.
 _SURROUND_COLOR = "#1a1a1a"
@@ -81,8 +81,8 @@ class CompositionWindow(QWidget):
             bool(self._settings.get(Keys.VIEW_RULER_VISIBLE))
         )
 
-        # Text editor — fills full width, styled for dark environment.
-        self._text = QTextEdit(self)
+
+        self._text = _CompositionEditor(self)
         self._text.setFrameShape(QTextEdit.NoFrame)
         self._text.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._text.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -320,3 +320,53 @@ class CompositionWindow(QWidget):
             self._leave()
             return
         super().keyPressEvent(event)
+
+
+class _CompositionEditor(_PasteWithoutColor, QTextEdit):
+    """Composition-mode QTextEdit.
+
+    Subclasses ``QTextEdit`` solely to inherit :class:`_PasteWithoutColor`'s
+    paste-without-text-color behavior, so distraction-free composition mode
+    strips foreground color the same way the main editor does. It also mirrors
+    the main editor's right-click menu for Read Selection and Print Selection.
+    """
+
+    def contextMenuEvent(self, event):
+        menu = self.createStandardContextMenu(event.pos())
+        first = menu.actions()[0] if menu.actions() else None
+
+        # Read Selection at the top when a selection exists.
+        if self.textCursor().hasSelection():
+            act_read = QAction("Read Selection", menu)
+            # Forward to the main window's TTS read-selection handler.
+            main_win = self._find_main_window()
+            if main_win is not None:
+                act_read.triggered.connect(main_win.read_selection)
+                menu.insertAction(first, act_read)
+                menu.insertSeparator(first)
+
+        # Print Selection / Print Document at the bottom.
+        act_print = QAction(
+            "Print Selection" if self.textCursor().hasSelection() else "Print Document",
+            menu
+        )
+        main_win = self._find_main_window()
+        if main_win is not None:
+            # Use the main window's print entry point.
+            act_print.triggered.connect(main_win._action_print)
+        menu.insertAction(first, act_print)
+        menu.insertSeparator(first)
+
+        menu.exec(event.globalPos())
+
+    def _find_main_window(self):
+        # Walk up the widget chain to the CompositionWindow, then to its parent
+        # MainWindow. CompositionWindow is created and owned by MainWindow.
+        w = self.parent()
+        # Up through the layout / CompositionWindow
+        while w is not None:
+            from skribe.main_window import MainWindow
+            if isinstance(w, MainWindow):
+                return w
+            w = w.parent()
+        return None
