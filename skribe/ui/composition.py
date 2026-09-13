@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 
 from skribe.settings import Keys, app_settings
 from skribe.ui.ruler import RulerWidget
-from skribe.ui.editor import HEADING_CHOICES, _PasteWithoutColor
+from skribe.ui.editor import HEADING_CHOICES, _PasteWithoutColor, _strip_to_body
 
 # Surround / page colors for the dark composition environment.
 _SURROUND_COLOR = "#1a1a1a"
@@ -338,26 +338,33 @@ class _CompositionEditor(_PasteWithoutColor, QTextEdit):
     def contextMenuEvent(self, event):
         menu = self.createStandardContextMenu(event.pos())
         first = menu.actions()[0] if menu.actions() else None
+        main_win = self._find_main_window()
+        cursor = self.textCursor()
+        has_selection = cursor.hasSelection()
 
-        # Read Selection at the top when a selection exists.
-        if self.textCursor().hasSelection():
+        # Read Selection at the top when a selection exists. Reads from this
+        # editor's own cursor — composition mode has its own QTextEdit view
+        # (sharing the document, not the cursor) with the main editor.
+        if has_selection and main_win is not None:
             act_read = QAction("Read Selection", menu)
-            # Forward to the main window's TTS read-selection handler.
-            main_win = self._find_main_window()
-            if main_win is not None:
-                act_read.triggered.connect(main_win.read_selection)
-                menu.insertAction(first, act_read)
-                menu.insertSeparator(first)
+            selected_text = cursor.selectedText().replace("\u2029", "\n")
+            act_read.triggered.connect(lambda: main_win._start_tts(selected_text))
+            menu.insertAction(first, act_read)
+            menu.insertSeparator(first)
 
         # Print Selection / Print Document at the bottom.
         act_print = QAction(
-            "Print Selection" if self.textCursor().hasSelection() else "Print Document",
+            "Print Selection" if has_selection else "Print Document",
             menu
         )
-        main_win = self._find_main_window()
         if main_win is not None:
-            # Use the main window's print entry point.
-            act_print.triggered.connect(main_win._action_print)
+            if has_selection:
+                scratch = QTextDocument()
+                QTextCursor(scratch).insertFragment(cursor.selection())
+                html = _strip_to_body(scratch.toHtml())
+            else:
+                html = self.toHtml()
+            act_print.triggered.connect(lambda: main_win._print_from_html(html))
         menu.insertAction(first, act_print)
         menu.insertSeparator(first)
 

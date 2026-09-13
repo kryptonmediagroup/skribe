@@ -25,6 +25,7 @@ from PySide6.QtGui import (
     QTextCharFormat,
     QTextCursor,
     QTextFormat,
+    QTextDocument,
     QTextListFormat,
 )
 from PySide6.QtWidgets import (
@@ -735,8 +736,11 @@ class EditorWidget(QWidget):
         cursor = self._text.textCursor()
         if not cursor.hasSelection():
             return ""
-        html = self._text.toHtml(cursor)
-        return _strip_to_body(html)
+        # QTextEdit.toHtml() takes no arguments in PySide6 6.x — render the
+        # selection by copying its fragment into a scratch document instead.
+        scratch = QTextDocument()
+        QTextCursor(scratch).insertFragment(cursor.selection())
+        return _strip_to_body(scratch.toHtml())
 
     def document_html(self) -> str:
         return self._text.toHtml()
