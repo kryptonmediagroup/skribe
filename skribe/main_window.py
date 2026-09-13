@@ -1956,6 +1956,8 @@ class MainWindow(QMainWindow):
         # Create the composition window on first use.
         if self._composition_window is None:
             self._composition_window = CompositionWindow()
+            self._composition_window.main_window = self
+            self._composition_window._text.main_window = self
             self._composition_window.closed.connect(self._on_composition_closed)
         # Share the editor's QTextDocument and font.
         doc = self._editor._text.document()

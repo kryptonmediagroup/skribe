@@ -62,6 +62,10 @@ class CompositionWindow(QWidget):
         super().__init__(parent, Qt.Window)
         self.setAttribute(Qt.WA_DeleteOnClose, False)
         self._settings = app_settings()
+        # Back-reference to the MainWindow that owns this window, set by
+        # the caller after construction. The context menu uses it to find
+        # the read/print handlers without relying on the widget parent.
+        self.main_window = None
 
         # Dark surround
         pal = self.palette()
@@ -358,12 +362,13 @@ class _CompositionEditor(_PasteWithoutColor, QTextEdit):
         menu.insertSeparator(first)
 
         menu.exec(event.globalPos())
-
     def _find_main_window(self):
-        # Walk up the widget chain to the CompositionWindow, then to its parent
-        # MainWindow. CompositionWindow is created and owned by MainWindow.
+        # Prefer the stored back-reference to the MainWindow that owns this
+        # window (set by the caller after construction); fall back to the
+        # widget parent chain if the back-reference isn't set.
+        if getattr(self, 'main_window', None) is not None:
+            return self.main_window
         w = self.parent()
-        # Up through the layout / CompositionWindow
         while w is not None:
             from skribe.main_window import MainWindow
             if isinstance(w, MainWindow):
