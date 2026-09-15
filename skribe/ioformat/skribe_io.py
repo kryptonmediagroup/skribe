@@ -65,11 +65,16 @@ def ensure_bundle_layout(bundle: Path) -> None:
 def _atomic_write_text(target: Path, data: str) -> None:
     """Write *data* atomically with fsync.
 
-    Writes to target.with_suffix(target.suffix + ".tmp") (or a .tmp next to target)
-    using a low-level file descriptor, fsyncs the data and directory, then
-    os.replace into place. The temp file lives on the same filesystem as target,
-    so the rename is atomic. Fsync reduces the chance of partially written
-    data surviving an unmount/power loss on flash media.
+    Writes to a ``.tmp`` file next to *target* using a low-level file
+    descriptor, fsyncs the data (and, on POSIX, the directory entry), then
+    ``os.replace``\\s into place. The temp file lives on the same filesystem
+    as target, so the rename is atomic. Fsync reduces the chance of
+    partially written data surviving an unmount/power loss on flash media.
+
+    Directory fsync is a POSIX concept — Windows has no equivalent (you
+    cannot open a directory with ``os.open``, and there's no ``O_DIRECTORY``
+    flag), so that step is skipped there. The file-data fsync and the
+    atomic rename are what matter and both work on every platform.
     """
     tmp = target.with_name(target.name + ".tmp")
     # Write to a file descriptor so we can fsync reliably.
@@ -79,12 +84,19 @@ def _atomic_write_text(target: Path, data: str) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        # Ensure the directory entry is flushed too.
-        dir_fd = os.open(target.parent, os.O_DIRECTORY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+        # Flush the directory entry too — POSIX only. Windows doesn't
+        # support opening a directory as a file descriptor at all.
+        dir_flag = getattr(os, "O_DIRECTORY", None)
+        if dir_flag is not None:
+            try:
+                dir_fd = os.open(target.parent, dir_flag)
+            except OSError:
+                dir_fd = None
+            if dir_fd is not None:
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
     except BaseException:
         # Best effort cleanup on failure.
         try:
@@ -96,7 +108,8 @@ def _atomic_write_text(target: Path, data: str) -> None:
         except OSError:
             pass
         raise
-    # Atomic rename on same filesystem.
+    # Atomic rename on same filesystem. On Windows, os.replace() already
+    # handles replacing an existing destination file (unlike os.rename()).
     os.replace(tmp, target)
 
 
