@@ -226,14 +226,14 @@ class _PasteWithoutColor:
         self.setTextCursor(cursor)
 
 
-class _Editor(_PasteWithoutColor, QTextEdit):
-    """QTextEdit subclass that belt-and-suspenders the text-indent on new blocks."""
+class _SmartQuoteInput:
+    """Mixin: contextual curly quotes on the quote keys.
 
-    def __init__(self, owner: "EditorWidget"):
-        super().__init__(owner)
-        self._owner = owner
-        self.setAcceptRichText(True)
-        self.setTabStopDistance(32)
+    Shared by the main editor and the composition-mode editor so both
+    behave identically. Ctrl/Meta + the quote key is the escape hatch —
+    it inserts the literal straight quote so users can override the
+    substitution for things like measurements (6' 2") or code fragments.
+    """
 
     def _smart_quote_for(self, straight: str) -> str:
         """Pick the curly variant of ``straight`` based on the char before the cursor."""
@@ -246,6 +246,32 @@ class _Editor(_PasteWithoutColor, QTextEdit):
         if not prev or prev.isspace():
             return opener
         return closer
+
+    def _handle_smart_quote_key(self, event, enabled: bool) -> bool:
+        """Handle a quote keystroke; return True if it was consumed."""
+        has_ctrl_meta = bool(event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier))
+        key = event.key()
+        if key in (Qt.Key_QuoteDbl, Qt.Key_Apostrophe) and has_ctrl_meta:
+            literal = '"' if key == Qt.Key_QuoteDbl else "'"
+            self.textCursor().insertText(literal)
+            event.accept()
+            return True
+        text = event.text()
+        if enabled and text in _SMART_QUOTE_PAIRS and not has_ctrl_meta:
+            self.textCursor().insertText(self._smart_quote_for(text))
+            event.accept()
+            return True
+        return False
+
+
+class _Editor(_SmartQuoteInput, _PasteWithoutColor, QTextEdit):
+    """QTextEdit subclass that belt-and-suspenders the text-indent on new blocks."""
+
+    def __init__(self, owner: "EditorWidget"):
+        super().__init__(owner)
+        self._owner = owner
+        self.setAcceptRichText(True)
+        self.setTabStopDistance(32)
 
     def _try_em_dash(self) -> bool:
         """Replace a trailing `-` with an em dash so `--` collapses to `—`.
@@ -295,25 +321,8 @@ class _Editor(_PasteWithoutColor, QTextEdit):
         is_newline = event.key() in (Qt.Key_Return, Qt.Key_Enter)
         has_ctrl_meta = bool(event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier))
 
-        # Smart quotes: substitute curly forms based on context. Ctrl/Meta +
-        # the quote key is the escape hatch — inserts the literal straight
-        # quote so users can override the substitution for things like
-        # measurements (6' 2") or quoted code fragments.
-        key = event.key()
-        is_quote_key = key in (Qt.Key_QuoteDbl, Qt.Key_Apostrophe)
-        if is_quote_key and has_ctrl_meta:
-            literal = '"' if key == Qt.Key_QuoteDbl else "'"
-            self.textCursor().insertText(literal)
-            event.accept()
-            return
-        if (
-            text in _SMART_QUOTE_PAIRS
-            and self._owner.smart_quotes_enabled()
-            and not has_ctrl_meta
-        ):
-            replacement = self._smart_quote_for(text)
-            self.textCursor().insertText(replacement)
-            event.accept()
+        # Smart quotes (see _SmartQuoteInput).
+        if self._handle_smart_quote_key(event, self._owner.smart_quotes_enabled()):
             return
 
         # Smart dashes: `--` collapses to an em dash; ` - ` (space-hyphen-

@@ -37,7 +37,12 @@ from PySide6.QtWidgets import (
 
 from skribe.settings import Keys, app_settings
 from skribe.ui.ruler import RulerWidget
-from skribe.ui.editor import HEADING_CHOICES, _PasteWithoutColor, _strip_to_body
+from skribe.ui.editor import (
+    HEADING_CHOICES,
+    _PasteWithoutColor,
+    _SmartQuoteInput,
+    _strip_to_body,
+)
 
 # Surround / page colors for the dark composition environment.
 _SURROUND_COLOR = "#1a1a1a"
@@ -326,7 +331,7 @@ class CompositionWindow(QWidget):
         super().keyPressEvent(event)
 
 
-class _CompositionEditor(_PasteWithoutColor, QTextEdit):
+class _CompositionEditor(_SmartQuoteInput, _PasteWithoutColor, QTextEdit):
     """Composition-mode QTextEdit.
 
     Subclasses ``QTextEdit`` solely to inherit :class:`_PasteWithoutColor`'s
@@ -334,6 +339,14 @@ class _CompositionEditor(_PasteWithoutColor, QTextEdit):
     strips foreground color the same way the main editor does. It also mirrors
     the main editor's right-click menu for Read Selection and Print Selection.
     """
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        # Same contextual curly-quote behavior as the main editor; the
+        # setting is read live so Preferences changes apply immediately.
+        enabled = bool(app_settings().get(Keys.EDITOR_SMART_QUOTES))
+        if self._handle_smart_quote_key(event, enabled):
+            return
+        super().keyPressEvent(event)
 
     def contextMenuEvent(self, event):
         menu = self.createStandardContextMenu(event.pos())
