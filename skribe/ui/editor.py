@@ -264,14 +264,14 @@ class _SmartQuoteInput:
         return False
 
 
-class _Editor(_SmartQuoteInput, _PasteWithoutColor, QTextEdit):
-    """QTextEdit subclass that belt-and-suspenders the text-indent on new blocks."""
+class _SmartDashInput:
+    """Mixin: ``--`` collapses to an em dash; ` - ` to ` – ` (en dash).
 
-    def __init__(self, owner: "EditorWidget"):
-        super().__init__(owner)
-        self._owner = owner
-        self.setAcceptRichText(True)
-        self.setTabStopDistance(32)
+    Shared by the main editor and the composition-mode editor so both
+    behave identically. Both substitutions fire only on the keystroke that
+    completes the pattern, so a lone hyphen or a hyphen at end-of-line
+    stays a hyphen until the user actually finishes the sequence.
+    """
 
     def _try_em_dash(self) -> bool:
         """Replace a trailing `-` with an em dash so `--` collapses to `—`.
@@ -316,26 +316,39 @@ class _Editor(_SmartQuoteInput, _PasteWithoutColor, QTextEdit):
         cursor.endEditBlock()
         return True
 
+    def _handle_dash_key(self, event, enabled: bool) -> bool:
+        """Handle a hyphen/space keystroke; return True if it was consumed."""
+        if not enabled:
+            return False
+        if event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier):
+            return False
+        text = event.text()
+        if (text == "-" and self._try_em_dash()) or (text == " " and self._try_en_dash()):
+            event.accept()
+            return True
+        return False
+
+
+class _Editor(_SmartDashInput, _SmartQuoteInput, _PasteWithoutColor, QTextEdit):
+    """QTextEdit subclass that belt-and-suspenders the text-indent on new blocks."""
+
+    def __init__(self, owner: "EditorWidget"):
+        super().__init__(owner)
+        self._owner = owner
+        self.setAcceptRichText(True)
+        self.setTabStopDistance(32)
+
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         text = event.text()
         is_newline = event.key() in (Qt.Key_Return, Qt.Key_Enter)
-        has_ctrl_meta = bool(event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier))
 
         # Smart quotes (see _SmartQuoteInput).
         if self._handle_smart_quote_key(event, self._owner.smart_quotes_enabled()):
             return
 
-        # Smart dashes: `--` collapses to an em dash; ` - ` (space-hyphen-
-        # space) collapses to ` – ` (en dash). Both fire only on the keystroke
-        # that completes the pattern, so a lone hyphen or a hyphen at end-of-
-        # line stays a hyphen until the user actually finishes the sequence.
-        if self._owner.smart_dashes_enabled() and not has_ctrl_meta:
-            if text == "-" and self._try_em_dash():
-                event.accept()
-                return
-            if text == " " and self._try_en_dash():
-                event.accept()
-                return
+        # Smart dashes (see _SmartDashInput).
+        if self._handle_dash_key(event, self._owner.smart_dashes_enabled()):
+            return
 
         # Return on an empty, indented paragraph: Qt's default handler wipes
         # the block's first-line indent instead of inserting a new block. That

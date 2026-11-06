@@ -40,6 +40,7 @@ from skribe.ui.ruler import RulerWidget
 from skribe.ui.editor import (
     HEADING_CHOICES,
     _PasteWithoutColor,
+    _SmartDashInput,
     _SmartQuoteInput,
     _strip_to_body,
 )
@@ -331,7 +332,7 @@ class CompositionWindow(QWidget):
         super().keyPressEvent(event)
 
 
-class _CompositionEditor(_SmartQuoteInput, _PasteWithoutColor, QTextEdit):
+class _CompositionEditor(_SmartDashInput, _SmartQuoteInput, _PasteWithoutColor, QTextEdit):
     """Composition-mode QTextEdit.
 
     Subclasses ``QTextEdit`` solely to inherit :class:`_PasteWithoutColor`'s
@@ -345,6 +346,12 @@ class _CompositionEditor(_SmartQuoteInput, _PasteWithoutColor, QTextEdit):
         # setting is read live so Preferences changes apply immediately.
         enabled = bool(app_settings().get(Keys.EDITOR_SMART_QUOTES))
         if self._handle_smart_quote_key(event, enabled):
+            return
+        # `--` → em dash and ` - ` → en dash, gated by the same Smart
+        # dashes preference as the main editor (read live).
+        if self._handle_dash_key(
+            event, bool(app_settings().get(Keys.EDITOR_SMART_DASHES))
+        ):
             return
         super().keyPressEvent(event)
 
