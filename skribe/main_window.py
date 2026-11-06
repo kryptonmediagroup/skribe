@@ -234,6 +234,9 @@ class MainWindow(QMainWindow):
         header.addStretch(1)
         right_layout.addLayout(header)
         right_layout.addWidget(right_split, 1)
+        # Zero-stretch expanding spacer: soaks up the vertical slack when
+        # ``right_split`` is hidden so the header stays pinned to the top.
+        right_layout.addStretch(0)
         self._right_pane_width = 320
 
         splitter = QSplitter(Qt.Horizontal, self)
