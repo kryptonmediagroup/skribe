@@ -217,14 +217,38 @@ class MainWindow(QMainWindow):
         right_split.setStretchFactor(1, 2)
         right_split.setSizes([260, 420])
 
+        # The right pane is wrapped in a container whose top-left corner holds
+        # a toggle button. Collapsing hides ``right_split`` and clamps the
+        # container to the button's width, so the button stays reachable.
+        self._right_split = right_split
+        self._right_pane = QWidget(self)
+        right_layout = QVBoxLayout(self._right_pane)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        self._right_toggle = QToolButton(self._right_pane)
+        self._right_toggle.setAutoRaise(True)
+        self._right_toggle.clicked.connect(self._toggle_right_pane)
+        header = QHBoxLayout()
+        header.setContentsMargins(2, 2, 2, 2)
+        header.addWidget(self._right_toggle)
+        header.addStretch(1)
+        right_layout.addLayout(header)
+        right_layout.addWidget(right_split, 1)
+        self._right_pane_width = 320
+
         splitter = QSplitter(Qt.Horizontal, self)
+        self._main_splitter = splitter
         splitter.addWidget(self._left_tabs)
         splitter.addWidget(self._center_stack)
-        splitter.addWidget(right_split)
+        splitter.addWidget(self._right_pane)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 4)
         splitter.setStretchFactor(2, 1)
         splitter.setSizes([280, 900, 320])
+        # Re-apply the persisted collapsed state (expanded is the default).
+        if bool(self._settings.get(Keys.RIGHT_PANE_COLLAPSED)):
+            self._apply_right_pane(True, resize=False)
+        self._update_right_toggle()
         self.setCentralWidget(splitter)
 
         self.setStatusBar(QStatusBar(self))
@@ -2605,6 +2629,49 @@ class MainWindow(QMainWindow):
         state = s.value(Keys.MAIN_STATE)
         if state:
             self.restoreState(state)
+
+    # --- right pane collapse ------------------------------------------
+
+    def _toggle_right_pane(self) -> None:
+        collapsed = self._right_split.isVisibleTo(self._right_pane)
+        self._apply_right_pane(collapsed)
+        self._settings.set(Keys.RIGHT_PANE_COLLAPSED, collapsed)
+
+    def _apply_right_pane(self, collapsed: bool, *, resize: bool = True) -> None:
+        """Collapse the right pane to just its toggle button, or restore it.
+
+        ``resize=False`` skips the splitter size shuffle (startup, before
+        the window is shown and sizes mean anything).
+        """
+        sizes = self._main_splitter.sizes()
+        if collapsed:
+            if resize and self._right_split.isVisibleTo(self._right_pane) and sizes[2] > 0:
+                self._right_pane_width = sizes[2]
+            self._right_split.setVisible(False)
+            strip = self._right_toggle.sizeHint().width() + 4
+            self._right_pane.setFixedWidth(strip)
+            sizes[1] += sizes[2] - strip
+            sizes[2] = strip
+        else:
+            self._right_split.setVisible(True)
+            self._right_pane.setMinimumWidth(0)
+            self._right_pane.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
+            self._right_pane.layout().activate()
+            width = self._right_pane_width
+            sizes[1] = max(sizes[1] + sizes[2] - width, 1)
+            sizes[2] = width
+        if resize:
+            self._main_splitter.setSizes(sizes)
+        self._update_right_toggle()
+
+    def _update_right_toggle(self) -> None:
+        collapsed = not self._right_split.isVisibleTo(self._right_pane)
+        # Arrow points in the direction the panel will move: right to hide
+        # it, left to bring it back.
+        self._right_toggle.setText("◀" if collapsed else "▶")
+        self._right_toggle.setToolTip(
+            "Show Inspector and Comments" if collapsed else "Hide Inspector and Comments"
+        )
 
     def _save_window_state(self) -> None:
         s = QSettings(APP_ORG, APP_NAME)

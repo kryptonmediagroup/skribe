@@ -69,6 +69,7 @@ class Keys:
     # Window
     MAIN_GEOMETRY = "mainwindow/geometry"
     MAIN_STATE = "mainwindow/state"
+    RIGHT_PANE_COLLAPSED = "mainwindow/right_pane_collapsed"
 
     # Automated backups
     BACKUP_DIR = "backup/destination_dir"
@@ -120,6 +121,7 @@ DEFAULTS: dict[str, Any] = {
 
     Keys.BACKUP_DIR: "",
     Keys.BACKUP_INTERVAL_MINUTES: 0,
+    Keys.RIGHT_PANE_COLLAPSED: False,
 }
 
 
