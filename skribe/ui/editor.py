@@ -562,25 +562,19 @@ class EditorWidget(QWidget):
     def html(self) -> str:
         if self._zoom_percent == ZOOM_DEFAULT:
             return self._text.toHtml()
-        # Snapshot at logical sizes, then restore display sizes. Both the
-        # default font (which Qt embeds in the <body> style) and every
-        # fragment's explicit point size have to come down to logical
-        # scale so the persisted HTML reloads identically at any zoom.
-        doc = self._text.document()
-        was_modified = doc.isModified()
-        scaled_font = self._text.font()
-        self._text.blockSignals(True)
+        # Persisted HTML must be at logical (100%) sizes so it reloads
+        # identically at any zoom. Both the default font (which Qt embeds
+        # in the <body> style) and every fragment's explicit point size
+        # have to come down. Do that on a scratch clone: rescaling the live
+        # document forces a full relayout twice, which shifts the scroll
+        # position under the user on every autosave.
+        scratch = self._text.document().clone()
         try:
-            self._text.setFont(self._default_font())
-            self._scale_char_format_sizes(100.0 / self._zoom_percent)
-            try:
-                return self._text.toHtml()
-            finally:
-                self._scale_char_format_sizes(self._zoom_percent / 100.0)
-                self._text.setFont(scaled_font)
+            scratch.setDefaultFont(self._default_font())
+            self._scale_char_format_sizes(100.0 / self._zoom_percent, scratch)
+            return scratch.toHtml()
         finally:
-            self._text.blockSignals(False)
-            doc.setModified(was_modified)
+            scratch.deleteLater()
 
     def plain_text(self) -> str:
         return self._text.toPlainText()
@@ -976,15 +970,19 @@ class EditorWidget(QWidget):
         scaled.setPointSizeF(base.pointSize() * self._zoom_percent / 100.0)
         self._text.setFont(scaled)
 
-    def _scale_char_format_sizes(self, ratio: float) -> None:
+    def _scale_char_format_sizes(
+        self, ratio: float, doc: Optional[QTextDocument] = None
+    ) -> None:
         """Multiply every fragment's explicit FontPointSize by ``ratio``.
 
-        Caller is expected to manage signal blocking and the document's
+        Operates on ``doc`` (default: the live document). For the live
+        document the caller is expected to manage signal blocking and the
         modification flag; this helper just walks the document.
         """
         if ratio == 1.0:
             return
-        doc = self._text.document()
+        if doc is None:
+            doc = self._text.document()
         cursor = QTextCursor(doc)
         cursor.beginEditBlock()
         try:
